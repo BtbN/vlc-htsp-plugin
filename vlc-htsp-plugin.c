@@ -25,7 +25,13 @@
 #include <vlc_demux.h>
 #include <vlc_access.h>
 #include <vlc_charset.h>
+#include <vlc_url.h>
 #include <vlc_cpu.h>
+
+#include <libhts/net.h>
+#include <libhts/sha1.h>
+#include <libhts/htsmsg.h>
+#include <libhts/htsmsg_binary.h>
 
 int OpenHTSP(vlc_object_t *);
 void CloseHTSP(vlc_object_t *);
@@ -42,10 +48,67 @@ vlc_module_begin ()
 	add_shortcut( "hts", "htsp" )
 vlc_module_end ()
 
+struct hts_stream_t
+{
+	es_out_id_t *es;
+};
+
 struct demux_sys_t
 {
 	mtime_t start;
+
+	socket_t connection;
+
+	int streamCount;
+	struct hts_stream_t **stream;
+
+	vlc_url_t url;
+
+	char *host;
+	uint16_t port;
+	char *username;
+	char *password;
+	int channelId;
+
+	int sessionId;
 };
+
+bool parseURL(demux_sys_t *sys, const char *path)
+{
+	if(path == 0 || *path == 0)
+		return false;
+
+	vlc_url_t *url = &(sys->url);
+	vlc_UrlParse(url, path, 0);
+
+	if(url->psz_host == 0 || *url->psz_host == 0)
+		return false;
+	else
+		sys->host = url->psz_host;
+
+	if(url->i_port <= 0)
+		sys->port = 9982;
+	else
+		sys->port = url->i_port;
+
+	sys->username = url->psz_username;
+	sys->password = url->psz_password;
+	sys->channelId = atoi(url->psz_path + 1); // Remove leading '/'
+
+	return true;
+}
+
+#define ERRBUF_SIZE 4096
+bool ConnectHTSP(demux_sys_t *sys)
+{
+	char *errbuf = (char*)malloc(ERRBUF_SIZE);
+	sys->connection = htsp_tcp_connect(sys->host, sys->port, errbuf, ERRBUF_SIZE, 5000);
+
+	if(sys->connection < 0)
+		return false;
+
+	return true;
+}
 
 int OpenHTSP(vlc_object_t *obj)
 {
@@ -56,10 +119,30 @@ int OpenHTSP(vlc_object_t *obj)
 		return VLC_ENOMEM;
 	demux->p_sys = sys;
 
-	printf("I'm here!\n");
+	sys->connection = 0;
+	sys->streamCount = 0;
+	sys->stream = 0;
+	sys->host = 0;
+	sys->port = 0;
+	sys->username = 0;
+	sys->password = 0;
+	sys->channelId = 0;
+	sys->sessionId = 0;
 
 	demux->pf_demux = DemuxHTSP;
 	demux->pf_control = ControlHTSP;
+
+	if(!parseURL(sys, demux->psz_location))
+	{
+		CloseHTSP(obj);
+		return VLC_EGENERIC;
+	}
+
+	if(!ConnectHTSP(sys))
+	{
+		CloseHTSP(obj);
+		return VLC_EGENERIC;
+	}
 
 	sys->start = mdate();
 
@@ -71,7 +154,13 @@ void CloseHTSP(vlc_object_t *obj)
 	demux_t *demux = (demux_t*)obj;
 	demux_sys_t *sys = demux->p_sys;
 
-	printf("No longer here\n");
+	if(!sys)
+		return;
+
+	if(sys->connection >= 0)
+		htsp_tcp_close(sys->connection);
+
+	vlc_UrlClean(&(sys->url));
 
 	free(sys);
 }
@@ -82,7 +171,6 @@ void CloseHTSP(vlc_object_t *obj)
 int DemuxHTSP(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
-	printf("I'm demuxing!\n");
 
 	return DEMUX_ERROR;
 }
@@ -90,7 +178,6 @@ int DemuxHTSP(demux_t *demux)
 int ControlHTSP(demux_t *demux, int i_query, va_list args)
 {
 	demux_sys_t *sys = demux->p_sys;
-	printf("I'm controling!\n");
 
 	switch(i_query)
 	{

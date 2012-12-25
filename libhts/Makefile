@@ -21,7 +21,6 @@ mostlyclean: clean
 
 libhts.a: $(SRC:%.c=%.o)
 	$(AR) rcs $@ $^
-	$(RANLIB) $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<
