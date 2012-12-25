@@ -1,0 +1,4 @@
+libhts/*.o
+libhts/*.a
+*.o
+*.so
