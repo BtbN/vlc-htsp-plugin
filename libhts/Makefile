@@ -5,12 +5,12 @@ RANLIB = ranlib
 INSTALL = install
 CFLAGS = -std=c99 -D_GNU_SOURCE -pipe -O2 -Wall -Wextra -DPIC -fPIC -I.
 
-SRC = htsmsg.o \
-      htsmsg_binary.o \
-      htsbuf.o \
-      htsstr.o \
-      net_posix.o \
-      sha1.o
+SRC = htsmsg.c \
+      htsmsg_binary.c \
+      htsbuf.c \
+      htsstr.c \
+      net_posix.c \
+      sha1.c
 
 all: libhts.a
 
