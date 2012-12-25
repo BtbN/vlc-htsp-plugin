@@ -41,7 +41,7 @@ mostlyclean: clean
 	$(CC) $(CFLAGS) -c $<
 
 libhtsp_plugin.so: libhts $(SOURCES:%.c=%.o)
-	$(CC) $(LDFLAGS) -shared -o $@ $(SOURCES:%.c=%.o)
+	$(CC) -shared -o $@ $(SOURCES:%.c=%.o) $(LDFLAGS)
 
 libhts:
 	make -C libhts all

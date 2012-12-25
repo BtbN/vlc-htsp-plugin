@@ -48,10 +48,10 @@ vlc_module_begin ()
 	add_shortcut( "hts", "htsp" )
 vlc_module_end ()
 
-struct hts_stream_t
+typedef struct hts_stream
 {
 	es_out_id_t *es;
-};
+} hts_stream_t;
 
 struct demux_sys_t
 {
@@ -60,7 +60,7 @@ struct demux_sys_t
 	socket_t connection;
 
 	int streamCount;
-	struct hts_stream_t **stream;
+	hts_stream_t **stream;
 
 	vlc_url_t url;
 
@@ -71,6 +71,8 @@ struct demux_sys_t
 	int channelId;
 
 	int sessionId;
+
+	uint32_t nextSeqNum;
 };
 
 bool parseURL(demux_sys_t *sys, const char *path)
@@ -93,9 +95,48 @@ bool parseURL(demux_sys_t *sys, const char *path)
 
 	sys->username = url->psz_username;
 	sys->password = url->psz_password;
-	sys->channelId = atoi(url->psz_path + 1); // Remove leading '/'
+
+	if(url->psz_path == 0 || *(url->psz_path) == '\0')
+		sys->channelId = 0;
+	else
+		sys->channelId = atoi(url->psz_path + 1); // Remove leading '/'
 
 	return true;
+}
+
+uint32_t HTSPNextSeqNum(demux_sys_t *sys)
+{
+	return sys->nextSeqNum++;
+}
+
+bool TransmitMessage(demux_sys_t *sys, htsmsg_t *m)
+{
+	if(!sys || sys->connection < 0)
+		return false;
+	
+	void *buf;
+	size_t len;
+
+	if(htsmsg_binary_serialize(m, &buf, &len, -1) < 0)
+	{
+		htsmsg_destroy(m);
+		return false;
+	}
+	htsmsg_destroy(m);
+
+	htsbuf_queue_t q;
+	htsbuf_queue_init(&q, 0);
+	htsbuf_append_prealloc(&q, buf, len);
+	htsp_tcp_write_queue(sys->connection, &q);
+	htsbuf_queue_flush(&q);
+
+	return true;
+}
+
+htsmsg_t * ReadResult(demux_sys_t *sys, htsmsg_t *m, bool sequence)
+{
+	if(!TransmitMessage(sys, m))
+		return 0;
 }
 
 #define ERRBUF_SIZE 4096
@@ -105,6 +146,17 @@ bool ConnectHTSP(demux_sys_t *sys)
 	sys->connection = htsp_tcp_connect(sys->host, sys->port, errbuf, ERRBUF_SIZE, 5000);
 
 	if(sys->connection < 0)
+		return false;
+
+	htsmsg_t *m, *cap;
+	htsmsg_field_t *f;
+
+	m = htsmsg_create_map();
+	htsmsg_add_str(m, "method", "hello");
+	htsmsg_add_str(m, "clientname", "VLC media player");
+	htsmsg_add_u32(m, "htspversion", 7);
+
+	if((m = ReadResult(sys, m, true)) == 0)
 		return false;
 
 	return true;
@@ -128,6 +180,7 @@ int OpenHTSP(vlc_object_t *obj)
 	sys->password = 0;
 	sys->channelId = 0;
 	sys->sessionId = 0;
+	sys->nextSeqNum = 0;
 
 	demux->pf_demux = DemuxHTSP;
 	demux->pf_control = ControlHTSP;
