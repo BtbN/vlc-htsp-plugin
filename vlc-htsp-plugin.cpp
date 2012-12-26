@@ -95,7 +95,7 @@ struct demux_sys_t
 
 	int netfd;
 
-	int streamCount;
+	uint32_t streamCount;
 	hts_stream *stream;
 
 	vlc_url_t url;
@@ -460,7 +460,7 @@ static void CloseHTSP(vlc_object_t *obj)
 		return;
 
 	if(sys->stream && sys->streamCount)
-		for(int i = 0; i < sys->streamCount; i++)
+		for(uint32_t i = 0; i < sys->streamCount; i++)
 			es_out_Del(demux->out, sys->stream[i].es);
 	
 	delete sys;
@@ -498,7 +498,7 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 
 	if(sys->stream != 0)
 	{
-		for(int i = 0; i < sys->streamCount; i++)
+		for(uint32_t i = 0; i < sys->streamCount; i++)
 			es_out_Del(demux->out, sys->stream[i].es);
 		delete[] sys->stream;
 		sys->stream = 0;
@@ -513,12 +513,12 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		return false;
 	}
 	
-	int streamCount = 0;
+	sys->streamCount = 0;
 	HTSMSG_FOREACH(f, streams)
-		streamCount++;
-	msg_Dbg(demux, "Found %d elementary streams", streamCount);
+		sys->streamCount++;
+	msg_Dbg(demux, "Found %d elementary streams", sys->streamCount);
 	
-	sys->stream = new hts_stream[streamCount];
+	sys->stream = new hts_stream[sys->streamCount];
 	
 	HTSMSG_FOREACH(f, streams)
 	{
@@ -661,33 +661,44 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 		return false;
 	}
 	
+	if(index > sys->streamCount || index == 0)
+	{
+		htsmsg_print(msg);
+		msg_Err(demux, "Invalid stream index detected: %d with %d streams", index, sys->streamCount);
+		return false;
+	}
+	
 	block_t *block = block_Alloc(binlen);
 	if(unlikely(block == 0))
 		return false;
 	
 	memcpy(block->p_buffer, bin, binlen);
 	
+	block->i_pts = VLC_TS_INVALID;
 	if(!htsmsg_get_s64(msg, "pts", &pts) && pts != 0)
 		block->i_pts = pts;
 	
+	block->i_dts = VLC_TS_INVALID;
 	if(!htsmsg_get_s64(msg, "dts", &dts) && dts != 0)
 		block->i_dts = dts;
 	
 	if(!htsmsg_get_s64(msg, "duration", &duration) && duration != 0)
-		block->i_length = duration;
+	{
+		//block->i_length = duration;
+	}
 
 	if(!htsmsg_get_u32(msg, "frametype", &frametype) && frametype != 0)
 	{
 		char ft = (char)frametype;
 		if(ft == 'I')
-			block->i_flags |= BLOCK_FLAG_TYPE_I;
+			block->i_flags = BLOCK_FLAG_TYPE_I;
 		else if(ft == 'B')
-			block->i_flags |= BLOCK_FLAG_TYPE_B;
+			block->i_flags = BLOCK_FLAG_TYPE_B;
 		else if(ft == 'P')
-			block->i_flags |= BLOCK_FLAG_TYPE_P;
+			block->i_flags = BLOCK_FLAG_TYPE_P;
 	}
 
-	msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld", index, pts, dts, duration, frametype?frametype:'-', binlen);
+	//msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld", index, pts, dts, duration, frametype?frametype:'-', binlen);
 	
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
 	
