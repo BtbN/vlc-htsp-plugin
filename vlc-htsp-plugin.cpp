@@ -93,7 +93,7 @@ struct demux_sys_t
 	int netfd;
 
 	int streamCount;
-	hts_stream **stream;
+	hts_stream *stream;
 
 	vlc_url_t url;
 
@@ -156,6 +156,7 @@ bool TransmitMessage(demux_t *demux, htsmsg_t *m)
 	return true;
 }
 
+#define READ_TIMEOUT 10
 htsmsg_t * ReadMessage(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -171,7 +172,10 @@ htsmsg_t * ReadMessage(demux_t *demux)
 	}
 	
 	if(net_Read(demux, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
+	{
+		msg_Dbg(demux, "Could not read length");
 		return 0;
+	}
 
 	len = ntohl(len);
 	
@@ -180,8 +184,25 @@ htsmsg_t * ReadMessage(demux_t *demux)
 		
 	buf = malloc(len);
 	
-	if(net_Read(demux, sys->netfd, NULL, buf, len, false) != len)
+	ssize_t read;
+	void *wbuf = buf;
+	uint32_t tlen = len;
+	time_t start = time(0);
+	while((read = net_Read(demux, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
 	{
+		wbuf += read;
+		tlen -= read;
+		
+		if(difftime(start, time(0)) > READ_TIMEOUT)
+		{
+			msg_Err(demux, "Read timeout!");
+			free(buf);
+			return 0;
+		}
+	}
+	if(read > tlen)
+	{
+		msg_Dbg(demux, "WTF");
 		free(buf);
 		return 0;
 	}
@@ -471,10 +492,7 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 	if(sys->stream != 0)
 	{
 		for(int i = 0; i < sys->streamCount; i++)
-		{
-			es_out_Del(demux->out, sys->stream[i]->es);
-			delete sys->stream[i];
-		}
+			es_out_Del(demux->out, sys->stream[i].es);
 		delete[] sys->stream;
 		sys->stream = 0;
 		sys->streamCount = 0;
@@ -488,16 +506,110 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		return false;
 	}
 	
-	htsmsg_print(msg);
-	printf("\n\n");
-	htsmsg_print(streams);
+	int streamCount = 0;
+	HTSMSG_FOREACH(f, streams)
+		streamCount++;
+	msg_Dbg(demux, "Found %d elementary streams", streamCount);
 	
-	return false;
+	sys->stream = new hts_stream[streamCount];
+	
+	HTSMSG_FOREACH(f, streams)
+	{
+		uint32_t index;
+		std::string type;
+		htsmsg_t *sub;
+		
+		if(f->hmf_type != HMF_MAP)
+			continue;
+		sub = &f->hmf_msg;
+		
+		type = htsmsg_get_stdstr(sub, "type");
+		if(type.empty())
+			continue;
+		
+		if(htsmsg_get_u32(sub, "index", &index))
+			continue;
+		int i = index - 1;
+		
+		es_format_t fmt;
+		
+		if(type == "AC3")
+		{
+			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_A52);
+		}
+		else if(type == "EAC3")
+		{
+			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_EAC3);
+		}
+		else if(type == "MPEG2AUDIO")
+		{
+			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_MP2);
+		}
+		else if(type == "AAC")
+		{
+			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_MP4A);
+		}
+		else if(type == "AACLATM")
+		{
+			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_MP4A);
+		}
+		else if(type == "MPEG2VIDEO")
+		{
+			es_format_Init(&fmt, VIDEO_ES, VLC_CODEC_MP2V);
+			uint32_t tmp;
+			if(!htsmsg_get_u32(sub, "width", &tmp))
+				fmt.video.i_width = tmp;
+			if(!htsmsg_get_u32(sub, "height", &tmp))
+				fmt.video.i_height = tmp;
+		}
+		else if(type == "H264")
+		{
+			es_format_Init(&fmt, VIDEO_ES, VLC_CODEC_H264);
+			uint32_t tmp;
+			if(!htsmsg_get_u32(sub, "width", &tmp))
+				fmt.video.i_width = tmp;
+			if(!htsmsg_get_u32(sub, "height", &tmp))
+				fmt.video.i_height = tmp;
+		}
+		else if(type == "DVBSUB")
+		{
+			es_format_Init(&fmt, SPU_ES, VLC_CODEC_DVBS);
+		}
+		else if(type == "TEXTSUB")
+		{
+			es_format_Init(&fmt, SPU_ES, VLC_CODEC_TEXT);
+		}
+		else if(type == "TELETEXT")
+		{
+			es_format_Init(&fmt, SPU_ES, VLC_CODEC_TELETEXT);
+		}
+		else
+		{
+			sys->stream[i].es = 0;
+			continue;
+		}
+		
+		std::string lang = htsmsg_get_stdstr(sub, "language");
+		if(!lang.empty())
+		{
+			fmt.psz_language = (char*)malloc(lang.length()+1);
+			strncpy(fmt.psz_language, lang.c_str(), lang.length());
+			fmt.psz_language[lang.length()] = 0;
+		}
+		
+		fmt.i_group = index;
+		
+		sys->stream[i].es = es_out_Add(demux->out, &fmt);
+		
+		msg_Dbg(demux, "Found elementary stream id %d, type %s", index, type.c_str());
+	}
+	
+	return true;
 }
 	
 bool ParseSubscriptionStop(demux_t *demux, htsmsg_t *msg)
 {
-	return true;
+	return false;
 }
 
 bool ParseSubscriptionStatus(demux_t *demux, htsmsg_t *msg)
@@ -507,16 +619,65 @@ bool ParseSubscriptionStatus(demux_t *demux, htsmsg_t *msg)
 
 bool ParseQueueStatus(demux_t *demux, htsmsg_t *msg)
 {
+	VLC_UNUSED(demux);
+	VLC_UNUSED(msg);
 	return true;
 }
 
 bool ParseSignalStatus(demux_t *demux, htsmsg_t *msg)
 {
+	VLC_UNUSED(demux);
+	VLC_UNUSED(msg);
 	return true;
 }
 
 bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 {
+	demux_sys_t *sys = demux->p_sys;
+
+	uint32_t index;
+	const void *bin;
+	size_t binlen;
+	int64_t pts;
+	int64_t dts;
+	int64_t duration;
+	uint32_t frametype;
+	
+	if(htsmsg_get_u32(msg, "stream", &index) || htsmsg_get_bin(msg, "payload", &bin, &binlen))
+	{
+		msg_Err(demux, "Malformed Mux Packet!");
+		return false;
+	}
+	
+	block_t *block = block_Alloc(binlen);
+	if(unlikely(block == 0))
+		return false;
+	
+	memcpy(block->p_buffer, bin, binlen);
+	
+	if(!htsmsg_get_s64(msg, "pts", &pts))
+		block->i_pts = pts;
+		//es_out_Control(demux->out, ES_OUT_SET_GROUP_PCR, index, pts);
+	
+	if(!htsmsg_get_s64(msg, "dts", &dts))
+		block->i_dts = dts;
+	
+	if(!htsmsg_get_s64(msg, "duration", &duration))
+		block->i_length = duration;
+
+	if(!htsmsg_get_u32(msg, "frametype", &frametype))
+	{
+		char ft = (char)frametype;
+		if(ft == 'I')
+			block->i_flags |= BLOCK_FLAG_TYPE_I;
+		else if(ft == 'B')
+			block->i_flags |= BLOCK_FLAG_TYPE_B;
+		else if(ft == 'P')
+			block->i_flags |= BLOCK_FLAG_TYPE_P;
+	}
+	
+	es_out_Send(demux->out, sys->stream[index - 1].es, block);
+	
 	return true;
 }
  
