@@ -25,6 +25,8 @@
 #include <vlc_url.h>
 #include <vlc_network.h>
 
+#include <libavcodec/avcodec.h>
+
 #include <deque>
 #include <string>
 
@@ -52,6 +54,10 @@ vlc_module_end ()
 
 struct hts_stream
 {
+	hts_stream()
+		:es(0)
+	{}
+
 	es_out_id_t *es;
 };
 
@@ -67,7 +73,6 @@ struct demux_sys_t
 		,username("")
 		,password("")
 		,channelId(0)
-		,sessionId(0)
 		,nextSeqNum(0)
 	{}
 	
@@ -101,16 +106,21 @@ struct demux_sys_t
 	std::string serverName;
 	std::string serverVersion;
 	int32_t protoVersion;
-	
-	int sessionId;
 
 	uint32_t nextSeqNum;
 	std::deque<htsmsg_t*> queue;
 };
 
+/***************************************************
+ ****       HTS Protocol Helper Functions       ****
+ ***************************************************/
+
 std::string htsmsg_get_stdstr(htsmsg_t *m, const char *n)
 {
-	return htsmsg_get_str(m, n);
+	const char* r = htsmsg_get_str(m, n);
+	if(r == 0)
+		return std::string();
+	return r;
 }
 
 uint32_t HTSPNextSeqNum(demux_sys_t *sys)
@@ -248,6 +258,10 @@ bool ReadSuccess(demux_t *demux, htsmsg_t *m, const std::string &action, bool se
 	return true;
 }
 
+/***************************************************
+ ****       Initialization Functions            ****
+ ***************************************************/
+
 bool ConnectHTSP(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -314,6 +328,22 @@ bool ConnectHTSP(demux_t *demux)
 		msg_Info(demux, "Successfully authenticated!");
 	else
 		msg_Err(demux, "Authentication failed!");
+	return res;
+}
+
+bool SubscribeHTSP(demux_t *demux)
+{
+	demux_sys_t *sys = demux->p_sys;
+	
+	htsmsg_t *m = htsmsg_create_map();
+	htsmsg_add_str(m, "method"         , "subscribe");
+	htsmsg_add_s32(m, "channelId"      , sys->channelId);
+	htsmsg_add_s32(m, "subscriptionId" , 1);
+	htsmsg_add_u32(m, "timeshiftPeriod", (uint32_t)~0);
+	
+	bool res = ReadSuccess(demux, m, "subscribe to channel");
+	if(res)
+		msg_Info(demux, "Successfully subscribed to channel %d", sys->channelId);
 	return res;
 }
 
@@ -384,6 +414,13 @@ static int OpenHTSP(vlc_object_t *obj)
 		CloseHTSP(obj);
 		return VLC_EGENERIC;
 	}
+	
+	if(!SubscribeHTSP(demux))
+	{
+		msg_Dbg(demux, "Subscribing to channel failed");
+		CloseHTSP(obj);
+		return VLC_EGENERIC;
+	}
 
 	sys->start = mdate();
 
@@ -399,17 +436,7 @@ static void CloseHTSP(vlc_object_t *obj)
 		return;
 
 	delete sys;
-}
-
-#define DEMUX_EOF 0
-#define DEMUX_OK 1
-#define DEMUX_ERROR -1
-static int DemuxHTSP(demux_t *demux)
-{
-	demux_sys_t *sys = demux->p_sys;
-	VLC_UNUSED(sys);
-
-	return DEMUX_ERROR;
+	sys = demux->p_sys = 0;
 }
 
 static int ControlHTSP(demux_t *demux, int i_query, va_list args)
@@ -433,3 +460,143 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 	}
 }
 
+/***************************************************
+ ****       Actual Demuxing Work Functions      ****
+ ***************************************************/
+
+bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
+{
+	demux_sys_t *sys = demux->p_sys;
+
+	if(sys->stream != 0)
+	{
+		for(int i = 0; i < sys->streamCount; i++)
+		{
+			es_out_Del(demux->out, sys->stream[i]->es);
+			delete sys->stream[i];
+		}
+		delete[] sys->stream;
+		sys->stream = 0;
+		sys->streamCount = 0;
+	}
+
+	htsmsg_t *streams;
+	htsmsg_field_t *f;
+	if((streams = htsmsg_get_list(msg, "streams")) == 0)
+	{
+		msg_Err(demux, "Malformed SubscriptionStart!");
+		return false;
+	}
+	
+	htsmsg_print(msg);
+	printf("\n\n");
+	htsmsg_print(streams);
+	
+	return false;
+}
+	
+bool ParseSubscriptionStop(demux_t *demux, htsmsg_t *msg)
+{
+	return true;
+}
+
+bool ParseSubscriptionStatus(demux_t *demux, htsmsg_t *msg)
+{
+	return true;
+}
+
+bool ParseQueueStatus(demux_t *demux, htsmsg_t *msg)
+{
+	return true;
+}
+
+bool ParseSignalStatus(demux_t *demux, htsmsg_t *msg)
+{
+	return true;
+}
+
+bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
+{
+	return true;
+}
+ 
+#define DEMUX_EOF 0
+#define DEMUX_OK 1
+#define DEMUX_ERROR -1
+static int DemuxHTSP(demux_t *demux)
+{
+	htsmsg_t *msg = ReadMessage(demux);
+	if(!msg)
+		return DEMUX_EOF;
+	
+	std::string method = htsmsg_get_stdstr(msg, "method");
+	if(method.empty())
+	{
+		htsmsg_destroy(msg);
+		return DEMUX_ERROR;
+	}
+	
+	uint32_t subs;
+	if(htsmsg_get_u32(msg, "subscriptionId", &subs) || subs != 1)
+	{
+		htsmsg_destroy(msg);
+		return DEMUX_OK;
+	}
+	
+	if(method == "subscriptionStart")
+	{
+		if(!ParseSubscriptionStart(demux, msg))
+		{
+			htsmsg_destroy(msg);
+			return DEMUX_ERROR;
+		}
+	}
+	else if(method == "subscriptionStop")
+	{
+		if(!ParseSubscriptionStop(demux, msg))
+		{
+			htsmsg_destroy(msg);
+			return DEMUX_ERROR;
+		}
+	}
+	else if(method == "subscriptionStatus")
+	{
+		if(!ParseSubscriptionStatus(demux, msg))
+		{
+			htsmsg_destroy(msg);
+			return DEMUX_ERROR;
+		}
+	}
+	else if(method == "queueStatus")
+	{
+		if(!ParseQueueStatus(demux, msg))
+		{
+			htsmsg_destroy(msg);
+			return DEMUX_ERROR;
+		}
+	}
+	else if(method == "signalStatus")
+	{
+		if(!ParseSignalStatus(demux, msg))
+		{
+			htsmsg_destroy(msg);
+			return DEMUX_ERROR;
+		}
+	}
+	else if(method == "muxpkt")
+	{
+		if(!ParseMuxPacket(demux, msg))
+		{
+			htsmsg_destroy(msg);
+			return DEMUX_ERROR;
+		}
+	}
+	else
+	{
+		msg_Dbg(demux, "Ignoring packet of unknown method \"%s\"", method.c_str());
+	}
+	
+	htsmsg_destroy(msg);
+		
+	return DEMUX_OK;
+}
