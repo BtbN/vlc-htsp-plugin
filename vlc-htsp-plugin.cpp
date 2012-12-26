@@ -458,10 +458,6 @@ static void CloseHTSP(vlc_object_t *obj)
 
 	if(!sys)
 		return;
-
-	if(sys->stream && sys->streamCount)
-		for(uint32_t i = 0; i < sys->streamCount; i++)
-			es_out_Del(demux->out, sys->stream[i].es);
 	
 	delete sys;
 	sys = demux->p_sys = 0;
@@ -610,7 +606,7 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 			strncpy(fmt.psz_language, lang.c_str(), lang.length());
 			fmt.psz_language[lang.length()] = 0;
 		}
-		
+
 		sys->stream[i].es = es_out_Add(demux->out, &fmt);
 		
 		msg_Dbg(demux, "Found elementary stream id %d, type %s", index, type.c_str());
@@ -699,6 +695,8 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 	}
 
 	//msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld", index, pts, dts, duration, frametype?frametype:'-', binlen);
+	
+	es_out_Control(demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, pts);
 	
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
 	
