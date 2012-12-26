@@ -1,23 +1,24 @@
 PREFIX = /usr
 LD = ld
 CC = gcc
+CXX = g++
 INSTALL = install
-CFLAGS = -g -pipe -O2 -Wall -Wextra -pedantic
-LDFLAGS =
+CFLAGS = -g -pipe -O2 -Wall -Wextra -std=gnu99 -DPIC -fPIC -I.
+CXXFLAGS = -g -pipe -O2 -Wall -Wextra -std=gnu++0x -DPIC -fPIC -I.
+LDFLAGS = -Wl,-no-undefined,-z,defs
 VLC_PLUGIN_CFLAGS := $(shell pkg-config --cflags vlc-plugin)
 VLC_PLUGIN_LIBS := $(shell pkg-config --libs vlc-plugin)
 
 libdir = $(PREFIX)/lib
 plugindir = $(libdir)/vlc/plugins
 
-override CFLAGS += -std=gnu99 -DPIC -fPIC -I.
-override LDFLAGS += -Wl,-no-undefined,-z,defs
-
-override CFLAGS += -DMODULE_STRING=\"htsp-plugin\" $(VLC_PLUGIN_CFLAGS)
+override CFLAGS += -DMODULE_STRING=\"htsp\" $(VLC_PLUGIN_CFLAGS)
+override CXXFLAGS += -DMODULE_STRING=\"htsp\" $(VLC_PLUGIN_CFLAGS)
 override LDFLAGS += $(VLC_PLUGIN_LIBS) libhts/libhts.a
 
 TARGETS = libhtsp_plugin.so
-SOURCES = vlc-htsp-plugin.c
+C_SOURCES = 
+CXX_SOURCES = vlc-htsp-plugin.cpp
 
 all: libhtsp_plugin.so
 
@@ -40,8 +41,11 @@ mostlyclean: clean
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<
 
-libhtsp_plugin.so: libhts $(SOURCES:%.c=%.o)
-	$(CC) -shared -o $@ $(SOURCES:%.c=%.o) $(LDFLAGS)
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $<
+
+libhtsp_plugin.so: libhts $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o)
+	$(CXX) -shared -o $@ $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o) $(LDFLAGS)
 
 libhts:
 	make -C libhts all

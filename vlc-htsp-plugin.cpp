@@ -16,9 +16,7 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-/*****************************************************************************
- * Preamble
- *****************************************************************************/
+#define __STDC_CONSTANT_MACROS 1
 
 #include <vlc_common.h>
 #include <vlc_plugin.h>
@@ -27,14 +25,17 @@
 #include <vlc_url.h>
 #include <vlc_network.h>
 
+extern "C"
+{
 #include <libhts/sha1.h>
 #include <libhts/htsmsg.h>
 #include <libhts/htsmsg_binary.h>
+}
 
-int OpenHTSP(vlc_object_t *);
-void CloseHTSP(vlc_object_t *);
-int DemuxHTSP(demux_t *demux);
-int ControlHTSP(demux_t *access, int i_query, va_list args);
+static int OpenHTSP(vlc_object_t *);
+static void CloseHTSP(vlc_object_t *);
+static int DemuxHTSP(demux_t *demux);
+static int ControlHTSP(demux_t *access, int i_query, va_list args);
 
 vlc_module_begin ()
 	set_shortname( "HTSP Protocol" )
@@ -46,10 +47,10 @@ vlc_module_begin ()
 	add_shortcut( "hts", "htsp" )
 vlc_module_end ()
 
-typedef struct hts_stream
+struct hts_stream
 {
 	es_out_id_t *es;
-} hts_stream_t;
+};
 
 struct demux_sys_t
 {
@@ -58,7 +59,7 @@ struct demux_sys_t
 	int netfd;
 
 	int streamCount;
-	hts_stream_t **stream;
+	hts_stream **stream;
 
 	vlc_url_t url;
 
@@ -73,8 +74,11 @@ struct demux_sys_t
 	uint32_t nextSeqNum;
 };
 
-bool parseURL(demux_sys_t *sys, const char *path)
+bool parseURL(demux_t *demux)
 {
+	demux_sys_t *sys = demux->p_sys;
+	const char *path = demux->psz_location;
+
 	if(path == 0 || *path == 0)
 		return false;
 
@@ -95,16 +99,25 @@ bool parseURL(demux_sys_t *sys, const char *path)
 	sys->password = url->psz_password;
 
 	if(url->psz_path == 0 || *(url->psz_path) == '\0')
-		sys->channelId = 0;
+	{
+		msg_Err(demux, "Missing Channel ID!");
+		return false;
+	}
 	else
 		sys->channelId = atoi(url->psz_path + 1); // Remove leading '/'
 
+	if(sys->channelId <= 0)
+		return false;
+		
 	return true;
 }
 
 uint32_t HTSPNextSeqNum(demux_sys_t *sys)
 {
-	return sys->nextSeqNum++;
+	uint32_t res = sys->nextSeqNum++;
+	if(sys->nextSeqNum > 2147483647)
+		sys->nextSeqNum = 0;
+	return res;
 }
 
 bool TransmitMessage(demux_t *demux, htsmsg_t *m)
@@ -127,7 +140,35 @@ bool TransmitMessage(demux_t *demux, htsmsg_t *m)
 	if(net_Write(demux, sys->netfd, NULL, buf, len) != (ssize_t)len)
 		return false;
 
+	free(buf);
+		
 	return true;
+}
+
+htsmsg_t * ReadMessage(demux_t *demux)
+{
+	demux_sys_t *sys = demux->p_sys;
+
+	void *buf;
+	uint32_t len;
+	
+	if(net_Read(demux, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
+		return 0;
+
+	len = ntohl(len);
+	
+	if(len == 0)
+		return htsmsg_create_map();
+		
+	buf = malloc(len);
+	
+	if(net_Read(demux, sys->netfd, NULL, buf, len, false) != len)
+	{
+		free(buf);
+		return 0;
+	}
+	
+	return htsmsg_binary_deserialize(buf, len, buf);
 }
 
 htsmsg_t * ReadResult(demux_t *demux, htsmsg_t *m, bool sequence)
@@ -163,7 +204,7 @@ bool ConnectHTSP(demux_t *demux)
 	return true;
 }
 
-int OpenHTSP(vlc_object_t *obj)
+static int OpenHTSP(vlc_object_t *obj)
 {
 	demux_t *demux = (demux_t*)obj;
 
@@ -186,14 +227,18 @@ int OpenHTSP(vlc_object_t *obj)
 	demux->pf_demux = DemuxHTSP;
 	demux->pf_control = ControlHTSP;
 
-	if(!parseURL(sys, demux->psz_location))
+	msg_Info(demux, "HTSP plugin loading...");
+	
+	if(!parseURL(demux))
 	{
+		msg_Dbg(demux, "Parsing URL failed!");
 		CloseHTSP(obj);
 		return VLC_EGENERIC;
 	}
 
 	if(!ConnectHTSP(demux))
 	{
+		msg_Dbg(demux, "Connecting to HTS source failed!");
 		CloseHTSP(obj);
 		return VLC_EGENERIC;
 	}
@@ -203,7 +248,7 @@ int OpenHTSP(vlc_object_t *obj)
 	return VLC_SUCCESS;
 }
 
-void CloseHTSP(vlc_object_t *obj)
+static void CloseHTSP(vlc_object_t *obj)
 {
 	demux_t *demux = (demux_t*)obj;
 	demux_sys_t *sys = demux->p_sys;
@@ -222,14 +267,14 @@ void CloseHTSP(vlc_object_t *obj)
 #define DEMUX_EOF 0
 #define DEMUX_OK 1
 #define DEMUX_ERROR -1
-int DemuxHTSP(demux_t *demux)
+static int DemuxHTSP(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
 
 	return DEMUX_ERROR;
 }
 
-int ControlHTSP(demux_t *demux, int i_query, va_list args)
+static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 {
 	demux_sys_t *sys = demux->p_sys;
 
@@ -241,7 +286,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			*va_arg(args, bool*) = false;
 			return VLC_SUCCESS;
 		case DEMUX_GET_PTS_DELAY:
-			*va_arg(args, int64_t*) = INT64_C(1000) *var_InheritInteger(demux, "live-caching");
+			*va_arg(args, int64_t*) = INT64_C(1000) *var_InheritInteger(demux, "network-caching");
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
 			*va_arg(args, int64_t*) = mdate() - sys->start;
