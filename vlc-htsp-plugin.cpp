@@ -604,8 +604,6 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 			fmt.psz_language[lang.length()] = 0;
 		}
 		
-		fmt.i_group = index;
-		
 		sys->stream[i].es = es_out_Add(demux->out, &fmt);
 		
 		msg_Dbg(demux, "Found elementary stream id %d, type %s", index, type.c_str());
