@@ -78,6 +78,9 @@ struct demux_sys_t
 	
 	~demux_sys_t()
 	{
+		if(stream)
+			delete[] stream;
+	
 		for(std::deque<htsmsg_t*>::iterator it = queue.begin(); it != queue.end(); it++)
 			htsmsg_destroy(*it);
 		queue.clear();
@@ -456,6 +459,10 @@ static void CloseHTSP(vlc_object_t *obj)
 	if(!sys)
 		return;
 
+	if(sys->stream && sys->streamCount)
+		for(int i = 0; i < sys->streamCount; i++)
+			es_out_Del(demux->out, sys->stream[i].es);
+	
 	delete sys;
 	sys = demux->p_sys = 0;
 }
