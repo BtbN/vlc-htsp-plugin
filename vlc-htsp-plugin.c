@@ -24,11 +24,9 @@
 #include <vlc_plugin.h>
 #include <vlc_demux.h>
 #include <vlc_access.h>
-#include <vlc_charset.h>
 #include <vlc_url.h>
-#include <vlc_cpu.h>
+#include <vlc_network.h>
 
-#include <libhts/net.h>
 #include <libhts/sha1.h>
 #include <libhts/htsmsg.h>
 #include <libhts/htsmsg_binary.h>
@@ -57,7 +55,7 @@ struct demux_sys_t
 {
 	mtime_t start;
 
-	socket_t connection;
+	int netfd;
 
 	int streamCount;
 	hts_stream_t **stream;
@@ -109,9 +107,11 @@ uint32_t HTSPNextSeqNum(demux_sys_t *sys)
 	return sys->nextSeqNum++;
 }
 
-bool TransmitMessage(demux_sys_t *sys, htsmsg_t *m)
+bool TransmitMessage(demux_t *demux, htsmsg_t *m)
 {
-	if(!sys || sys->connection < 0)
+	demux_sys_t *sys = demux->p_sys;
+
+	if(!sys || sys->netfd < 0)
 		return false;
 	
 	void *buf;
@@ -124,28 +124,29 @@ bool TransmitMessage(demux_sys_t *sys, htsmsg_t *m)
 	}
 	htsmsg_destroy(m);
 
-	htsbuf_queue_t q;
-	htsbuf_queue_init(&q, 0);
-	htsbuf_append_prealloc(&q, buf, len);
-	htsp_tcp_write_queue(sys->connection, &q);
-	htsbuf_queue_flush(&q);
+	if(net_Write(demux, sys->netfd, NULL, buf, len) != (ssize_t)len)
+		return false;
 
 	return true;
 }
 
-htsmsg_t * ReadResult(demux_sys_t *sys, htsmsg_t *m, bool sequence)
+htsmsg_t * ReadResult(demux_t *demux, htsmsg_t *m, bool sequence)
 {
-	if(!TransmitMessage(sys, m))
+	demux_sys_t *sys = demux->p_sys;
+
+	if(!TransmitMessage(demux, m))
 		return 0;
+	
+	return 0;
 }
 
-#define ERRBUF_SIZE 4096
-bool ConnectHTSP(demux_sys_t *sys)
+bool ConnectHTSP(demux_t *demux)
 {
-	char *errbuf = (char*)malloc(ERRBUF_SIZE);
-	sys->connection = htsp_tcp_connect(sys->host, sys->port, errbuf, ERRBUF_SIZE, 5000);
+	demux_sys_t *sys = demux->p_sys;
 
-	if(sys->connection < 0)
+	sys->netfd = net_ConnectTCP(demux, sys->host, sys->port);
+
+	if(sys->netfd < 0)
 		return false;
 
 	htsmsg_t *m, *cap;
@@ -156,7 +157,7 @@ bool ConnectHTSP(demux_sys_t *sys)
 	htsmsg_add_str(m, "clientname", "VLC media player");
 	htsmsg_add_u32(m, "htspversion", 7);
 
-	if((m = ReadResult(sys, m, true)) == 0)
+	if((m = ReadResult(demux, m, true)) == 0)
 		return false;
 
 	return true;
@@ -171,7 +172,7 @@ int OpenHTSP(vlc_object_t *obj)
 		return VLC_ENOMEM;
 	demux->p_sys = sys;
 
-	sys->connection = 0;
+	sys->netfd = -1;
 	sys->streamCount = 0;
 	sys->stream = 0;
 	sys->host = 0;
@@ -191,7 +192,7 @@ int OpenHTSP(vlc_object_t *obj)
 		return VLC_EGENERIC;
 	}
 
-	if(!ConnectHTSP(sys))
+	if(!ConnectHTSP(demux))
 	{
 		CloseHTSP(obj);
 		return VLC_EGENERIC;
@@ -210,8 +211,8 @@ void CloseHTSP(vlc_object_t *obj)
 	if(!sys)
 		return;
 
-	if(sys->connection >= 0)
-		htsp_tcp_close(sys->connection);
+	if(sys->netfd >= 0)
+		net_Close(sys->netfd);
 
 	vlc_UrlClean(&(sys->url));
 
