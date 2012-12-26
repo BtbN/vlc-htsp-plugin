@@ -550,7 +550,7 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		}
 		else if(type == "MPEG2AUDIO")
 		{
-			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_MP2);
+			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_MPGA);
 		}
 		else if(type == "AAC")
 		{
