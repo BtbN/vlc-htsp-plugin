@@ -662,17 +662,17 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 	
 	memcpy(block->p_buffer, bin, binlen);
 	
-	if(!htsmsg_get_s64(msg, "pts", &pts))
+	if(!htsmsg_get_s64(msg, "pts", &pts) && pts != 0)
 		block->i_pts = pts;
 		//es_out_Control(demux->out, ES_OUT_SET_GROUP_PCR, index, pts);
 	
-	if(!htsmsg_get_s64(msg, "dts", &dts))
+	if(!htsmsg_get_s64(msg, "dts", &dts) && dts != 0)
 		block->i_dts = dts;
 	
-	if(!htsmsg_get_s64(msg, "duration", &duration))
+	if(!htsmsg_get_s64(msg, "duration", &duration) && duration != 0)
 		block->i_length = duration;
 
-	if(!htsmsg_get_u32(msg, "frametype", &frametype))
+	if(!htsmsg_get_u32(msg, "frametype", &frametype) && frametype != 0)
 	{
 		char ft = (char)frametype;
 		if(ft == 'I')
