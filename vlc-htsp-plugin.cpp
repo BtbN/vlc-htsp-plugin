@@ -164,7 +164,7 @@ htsmsg_t * ReadMessage(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
 
-	void *buf;
+	char *buf;
 	uint32_t len;
 	
 	if(sys->queue.size())
@@ -185,10 +185,10 @@ htsmsg_t * ReadMessage(demux_t *demux)
 	if(len == 0)
 		return htsmsg_create_map();
 		
-	buf = malloc(len);
+	buf = (char*)malloc(len);
 	
 	ssize_t read;
-	void *wbuf = buf;
+	char *wbuf = buf;
 	uint32_t tlen = len;
 	time_t start = time(0);
 	while((read = net_Read(demux, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
@@ -563,20 +563,10 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		else if(type == "MPEG2VIDEO")
 		{
 			es_format_Init(&fmt, VIDEO_ES, VLC_CODEC_MP2V);
-			uint32_t tmp;
-			if(!htsmsg_get_u32(sub, "width", &tmp))
-				fmt.video.i_width = tmp;
-			if(!htsmsg_get_u32(sub, "height", &tmp))
-				fmt.video.i_height = tmp;
 		}
 		else if(type == "H264")
 		{
 			es_format_Init(&fmt, VIDEO_ES, VLC_CODEC_H264);
-			uint32_t tmp;
-			if(!htsmsg_get_u32(sub, "width", &tmp))
-				fmt.video.i_width = tmp;
-			if(!htsmsg_get_u32(sub, "height", &tmp))
-				fmt.video.i_height = tmp;
 		}
 		else if(type == "DVBSUB")
 		{
@@ -594,6 +584,23 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		{
 			sys->stream[i].es = 0;
 			continue;
+		}
+		
+		if(fmt.i_cat == VIDEO_ES)
+		{
+			uint32_t tmp;
+			if(!htsmsg_get_u32(sub, "width", &tmp) && tmp != 0)
+				fmt.video.i_width = tmp;
+			if(!htsmsg_get_u32(sub, "height", &tmp) && tmp != 0)
+				fmt.video.i_height = tmp;
+		}
+		else if(fmt.i_cat == AUDIO_ES)
+		{
+			uint32_t tmp;
+			if(!htsmsg_get_u32(sub, "channels", &tmp) && tmp != 0)
+				fmt.audio.i_physical_channels = tmp;
+			if(!htsmsg_get_u32(sub, "rate", &tmp) && tmp != 0)
+				fmt.audio.i_rate = tmp;
 		}
 		
 		std::string lang = htsmsg_get_stdstr(sub, "language");
@@ -662,7 +669,6 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 	
 	if(!htsmsg_get_s64(msg, "pts", &pts) && pts != 0)
 		block->i_pts = pts;
-		//es_out_Control(demux->out, ES_OUT_SET_GROUP_PCR, index, pts);
 	
 	if(!htsmsg_get_s64(msg, "dts", &dts) && dts != 0)
 		block->i_dts = dts;
@@ -680,6 +686,8 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 		else if(ft == 'P')
 			block->i_flags |= BLOCK_FLAG_TYPE_P;
 	}
+
+	msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld", index, pts, dts, duration, frametype?frametype:'-', binlen);
 	
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
 	
