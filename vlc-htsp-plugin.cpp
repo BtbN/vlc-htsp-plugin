@@ -113,46 +113,6 @@ std::string htsmsg_get_stdstr(htsmsg_t *m, const char *n)
 	return htsmsg_get_str(m, n);
 }
 
-bool parseURL(demux_t *demux)
-{
-	demux_sys_t *sys = demux->p_sys;
-	const char *path = demux->psz_location;
-
-	if(path == 0 || *path == 0)
-		return false;
-
-	vlc_url_t *url = &(sys->url);
-	vlc_UrlParse(url, path, 0);
-
-	if(url->psz_host == 0 || *url->psz_host == 0)
-		return false;
-	else
-		sys->host = url->psz_host;
-
-	if(url->i_port <= 0)
-		sys->port = 9982;
-	else
-		sys->port = url->i_port;
-
-	if(url->psz_username)
-		sys->username = url->psz_username;
-	if(url->psz_password)
-		sys->password = url->psz_password;
-
-	if(url->psz_path == 0 || *(url->psz_path) == '\0')
-	{
-		msg_Err(demux, "Missing Channel ID!");
-		return false;
-	}
-	else
-		sys->channelId = atoi(url->psz_path + 1); // Remove leading '/'
-
-	if(sys->channelId <= 0)
-		return false;
-		
-	return true;
-}
-
 uint32_t HTSPNextSeqNum(demux_sys_t *sys)
 {
 	uint32_t res = sys->nextSeqNum++;
@@ -355,6 +315,46 @@ bool ConnectHTSP(demux_t *demux)
 	else
 		msg_Err(demux, "Authentication failed!");
 	return res;
+}
+
+bool parseURL(demux_t *demux)
+{
+	demux_sys_t *sys = demux->p_sys;
+	const char *path = demux->psz_location;
+
+	if(path == 0 || *path == 0)
+		return false;
+
+	vlc_url_t *url = &(sys->url);
+	vlc_UrlParse(url, path, 0);
+
+	if(url->psz_host == 0 || *url->psz_host == 0)
+		return false;
+	else
+		sys->host = url->psz_host;
+
+	if(url->i_port <= 0)
+		sys->port = 9982;
+	else
+		sys->port = url->i_port;
+
+	if(url->psz_username)
+		sys->username = url->psz_username;
+	if(url->psz_password)
+		sys->password = url->psz_password;
+
+	if(url->psz_path == 0 || *(url->psz_path) == '\0')
+	{
+		msg_Err(demux, "Missing Channel ID!");
+		return false;
+	}
+	else
+		sys->channelId = atoi(url->psz_path + 1); // Remove leading '/'
+
+	if(sys->channelId <= 0)
+		return false;
+		
+	return true;
 }
 
 static int OpenHTSP(vlc_object_t *obj)
