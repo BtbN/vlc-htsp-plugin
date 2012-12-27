@@ -66,6 +66,8 @@ struct demux_sys_t
 {
 	demux_sys_t()
 		:start(0)
+		,pcrStream(0)
+		,lastPcr(0)
 		,netfd(0)
 		,streamCount(0)
 		,stream(0)
@@ -94,6 +96,8 @@ struct demux_sys_t
 	}
 
 	mtime_t start;
+	uint32_t pcrStream;
+	mtime_t lastPcr;
 
 	int netfd;
 
@@ -479,7 +483,7 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			*va_arg(args, bool*) = false;
 			return VLC_SUCCESS;
 		case DEMUX_GET_PTS_DELAY:
-			*va_arg(args, int64_t*) = INT64_C(1000) *var_InheritInteger(demux, "network-caching");
+			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching");
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
 			*va_arg(args, int64_t*) = mdate() - sys->start;
@@ -520,6 +524,7 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 	
 	sys->stream = new hts_stream[sys->streamCount];
 	sys->hadIFrame = false;
+	sys->pcrStream = 0;
 	
 	HTSMSG_FOREACH(f, streams)
 	{
@@ -589,6 +594,9 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		
 		if(fmt->i_cat == VIDEO_ES)
 		{
+			if(sys->pcrStream == 0)
+				sys->pcrStream = index;
+		
 			uint32_t tmp;
 			if(!htsmsg_get_u32(sub, "width", &tmp) && tmp != 0)
 				fmt->video.i_width = tmp;
@@ -617,7 +625,15 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		msg_Dbg(demux, "Found elementary stream id %d, type %s", index, type.c_str());
 	}
 	
+	if(sys->pcrStream == 0)
+		for(uint32_t i = 0; i < sys->streamCount; i++)
+			if(sys->stream[i].fmt.i_cat == AUDIO_ES)
+				sys->pcrStream = i+1;
+	if(sys->pcrStream == 0)
+		sys->pcrStream = 1;
+	
 	es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0);
+	sys->lastPcr = 0;
 	
 	return true;
 }
@@ -714,16 +730,25 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 			block->i_flags = BLOCK_FLAG_TYPE_P;
 	}
 
-	msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld, current mtime: %ld", index, pts, dts, duration, frametype?frametype:'-', binlen, mdate());
+	//msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld, current mtime: %ld", index, pts, dts, duration, frametype?frametype:'-', binlen, mdate());
 
-	if(sys->stream[index - 1].fmt.i_cat == VIDEO_ES)
-		es_out_Control(demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, VLC_TS_0 + pts);
+	if(index == sys->pcrStream)
+	{
+		mtime_t pcr = dts;
+		
+		if(pcr > sys->lastPcr + 300000 && pcr != VLC_TS_INVALID)
+		{
+			es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + dts);
+			msg_Dbg(demux, "Sent PCR %ld", dts);
+			sys->lastPcr = pcr;
+		}
+	}
 	
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
 	
 	return true;
 }
- 
+
 #define DEMUX_EOF 0
 #define DEMUX_OK 1
 #define DEMUX_ERROR -1
