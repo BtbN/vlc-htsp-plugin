@@ -182,24 +182,9 @@ htsmsg_t * ReadMessage(demux_t *demux)
 		return res;
 	}
 	
-	char *lenptr = (char*)&len;
-	ssize_t read;
-	uint32_t expct = sizeof(len);
-	time_t start = time(0);
-	while((read = net_Read(demux, sys->netfd, NULL, lenptr, expct, false)) < expct)
+	if(net_Read(demux, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
 	{
-		lenptr += read;
-		expct -= read;
-		
-		if(difftime(start, time(0)) > READ_TIMEOUT)
-		{
-			msg_Err(demux, "Length Read timeout!");
-			return 0;
-		}
-	}
-	if(read > expct)
-	{
-		msg_Dbg(demux, "WTF");
+		msg_Err(demux, "Error reading from socket!");
 		return 0;
 	}
 
@@ -210,9 +195,10 @@ htsmsg_t * ReadMessage(demux_t *demux)
 		
 	buf = (char*)malloc(len);
 	
+	ssize_t read;
 	char *wbuf = buf;
 	uint32_t tlen = len;
-	start = time(0);
+	time_t start = time(0);
 	while((read = net_Read(demux, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
 	{
 		wbuf += read;
@@ -386,6 +372,8 @@ bool SubscribeHTSP(demux_t *demux)
 	htsmsg_add_s32(m, "channelId"      , sys->channelId);
 	htsmsg_add_s32(m, "subscriptionId" , 1);
 	htsmsg_add_u32(m, "timeshiftPeriod", (uint32_t)~0);
+	//htsmsg_add_u32(m, "90khz", 1);
+	//htsmsg_add_u32(m, "normts", 1);
 	
 	bool res = ReadSuccess(demux, m, "subscribe to channel");
 	if(res)
@@ -654,11 +642,15 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 	
 bool ParseSubscriptionStop(demux_t *demux, htsmsg_t *msg)
 {
+	VLC_UNUSED(demux);
+	VLC_UNUSED(msg);
 	return false;
 }
 
 bool ParseSubscriptionStatus(demux_t *demux, htsmsg_t *msg)
 {
+	VLC_UNUSED(demux);
+	VLC_UNUSED(msg);
 	return true;
 }
 
@@ -748,14 +740,16 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 
 	if(index == sys->pcrStream)
 	{
-		mtime_t pcr = pts - 100000;
+		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + dts);
+	
+		/* mtime_t pcr = dts;
 		
 		if(pcr > sys->lastPcr + 300000 && pcr != VLC_TS_INVALID)
 		{
-			es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + dts);
+			es_out_Control(demux->out, ES_OUT_SET_PCR, pcr);
 			msg_Dbg(demux, "Sent PCR %ld", dts);
 			sys->lastPcr = pcr;
-		}
+		} */
 	}
 	
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
