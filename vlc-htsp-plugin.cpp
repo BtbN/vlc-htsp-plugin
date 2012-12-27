@@ -182,9 +182,24 @@ htsmsg_t * ReadMessage(demux_t *demux)
 		return res;
 	}
 	
-	if(net_Read(demux, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
+	char *lenptr = (char*)&len;
+	ssize_t read;
+	uint32_t expct = sizeof(len);
+	time_t start = time(0);
+	while((read = net_Read(demux, sys->netfd, NULL, lenptr, expct, false)) < expct)
 	{
-		msg_Dbg(demux, "Could not read length");
+		lenptr += read;
+		expct -= read;
+		
+		if(difftime(start, time(0)) > READ_TIMEOUT)
+		{
+			msg_Err(demux, "Length Read timeout!");
+			return 0;
+		}
+	}
+	if(read > expct)
+	{
+		msg_Dbg(demux, "WTF");
 		return 0;
 	}
 
@@ -195,10 +210,9 @@ htsmsg_t * ReadMessage(demux_t *demux)
 		
 	buf = (char*)malloc(len);
 	
-	ssize_t read;
 	char *wbuf = buf;
 	uint32_t tlen = len;
-	time_t start = time(0);
+	start = time(0);
 	while((read = net_Read(demux, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
 	{
 		wbuf += read;
@@ -734,7 +748,7 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 
 	if(index == sys->pcrStream)
 	{
-		mtime_t pcr = dts;
+		mtime_t pcr = pts - 100000;
 		
 		if(pcr > sys->lastPcr + 300000 && pcr != VLC_TS_INVALID)
 		{
