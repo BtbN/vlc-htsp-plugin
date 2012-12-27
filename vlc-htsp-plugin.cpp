@@ -59,6 +59,7 @@ struct hts_stream
 	{}
 
 	es_out_id_t *es;
+	es_format_t fmt;
 };
 
 struct demux_sys_t
@@ -74,6 +75,7 @@ struct demux_sys_t
 		,password("")
 		,channelId(0)
 		,nextSeqNum(0)
+		,hadIFrame(false)
 	{}
 	
 	~demux_sys_t()
@@ -112,6 +114,8 @@ struct demux_sys_t
 
 	uint32_t nextSeqNum;
 	std::deque<htsmsg_t*> queue;
+	
+	bool hadIFrame;
 };
 
 /***************************************************
@@ -515,6 +519,7 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 	msg_Dbg(demux, "Found %d elementary streams", sys->streamCount);
 	
 	sys->stream = new hts_stream[sys->streamCount];
+	sys->hadIFrame = false;
 	
 	HTSMSG_FOREACH(f, streams)
 	{
@@ -534,47 +539,47 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 			continue;
 		int i = index - 1;
 		
-		es_format_t fmt;
+		es_format_t *fmt = &(sys->stream[i].fmt);
 		
 		if(type == "AC3")
 		{
-			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_A52);
+			es_format_Init(fmt, AUDIO_ES, VLC_CODEC_A52);
 		}
 		else if(type == "EAC3")
 		{
-			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_EAC3);
+			es_format_Init(fmt, AUDIO_ES, VLC_CODEC_EAC3);
 		}
 		else if(type == "MPEG2AUDIO")
 		{
-			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_MPGA);
+			es_format_Init(fmt, AUDIO_ES, VLC_CODEC_MPGA);
 		}
 		else if(type == "AAC")
 		{
-			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_MP4A);
+			es_format_Init(fmt, AUDIO_ES, VLC_CODEC_MP4A);
 		}
 		else if(type == "AACLATM")
 		{
-			es_format_Init(&fmt, AUDIO_ES, VLC_CODEC_MP4A);
+			es_format_Init(fmt, AUDIO_ES, VLC_CODEC_MP4A);
 		}
 		else if(type == "MPEG2VIDEO")
 		{
-			es_format_Init(&fmt, VIDEO_ES, VLC_CODEC_MP2V);
+			es_format_Init(fmt, VIDEO_ES, VLC_CODEC_MP2V);
 		}
 		else if(type == "H264")
 		{
-			es_format_Init(&fmt, VIDEO_ES, VLC_CODEC_H264);
+			es_format_Init(fmt, VIDEO_ES, VLC_CODEC_H264);
 		}
 		else if(type == "DVBSUB")
 		{
-			es_format_Init(&fmt, SPU_ES, VLC_CODEC_DVBS);
+			es_format_Init(fmt, SPU_ES, VLC_CODEC_DVBS);
 		}
 		else if(type == "TEXTSUB")
 		{
-			es_format_Init(&fmt, SPU_ES, VLC_CODEC_TEXT);
+			es_format_Init(fmt, SPU_ES, VLC_CODEC_TEXT);
 		}
 		else if(type == "TELETEXT")
 		{
-			es_format_Init(&fmt, SPU_ES, VLC_CODEC_TELETEXT);
+			es_format_Init(fmt, SPU_ES, VLC_CODEC_TELETEXT);
 		}
 		else
 		{
@@ -582,35 +587,37 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 			continue;
 		}
 		
-		if(fmt.i_cat == VIDEO_ES)
+		if(fmt->i_cat == VIDEO_ES)
 		{
 			uint32_t tmp;
 			if(!htsmsg_get_u32(sub, "width", &tmp) && tmp != 0)
-				fmt.video.i_width = tmp;
+				fmt->video.i_width = tmp;
 			if(!htsmsg_get_u32(sub, "height", &tmp) && tmp != 0)
-				fmt.video.i_height = tmp;
+				fmt->video.i_height = tmp;
 		}
-		else if(fmt.i_cat == AUDIO_ES)
+		else if(fmt->i_cat == AUDIO_ES)
 		{
 			uint32_t tmp;
 			if(!htsmsg_get_u32(sub, "channels", &tmp) && tmp != 0)
-				fmt.audio.i_physical_channels = tmp;
+				fmt->audio.i_physical_channels = tmp;
 			if(!htsmsg_get_u32(sub, "rate", &tmp) && tmp != 0)
-				fmt.audio.i_rate = tmp;
+				fmt->audio.i_rate = tmp;
 		}
 		
 		std::string lang = htsmsg_get_stdstr(sub, "language");
 		if(!lang.empty())
 		{
-			fmt.psz_language = (char*)malloc(lang.length()+1);
-			strncpy(fmt.psz_language, lang.c_str(), lang.length());
-			fmt.psz_language[lang.length()] = 0;
+			fmt->psz_language = (char*)malloc(lang.length()+1);
+			strncpy(fmt->psz_language, lang.c_str(), lang.length());
+			fmt->psz_language[lang.length()] = 0;
 		}
 
-		sys->stream[i].es = es_out_Add(demux->out, &fmt);
+		sys->stream[i].es = es_out_Add(demux->out, fmt);
 		
 		msg_Dbg(demux, "Found elementary stream id %d, type %s", index, type.c_str());
 	}
+	
+	es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0);
 	
 	return true;
 }
@@ -643,13 +650,13 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 {
 	demux_sys_t *sys = demux->p_sys;
 
-	uint32_t index;
-	const void *bin;
-	size_t binlen;
-	int64_t pts;
-	int64_t dts;
-	int64_t duration;
-	uint32_t frametype;
+	uint32_t index = 0;
+	const void *bin = 0;
+	size_t binlen = 0;
+	int64_t pts = 0;
+	int64_t dts = 0;
+	int64_t duration = 0;
+	uint32_t frametype = 0;
 	
 	if(htsmsg_get_u32(msg, "stream", &index) || htsmsg_get_bin(msg, "payload", &bin, &binlen))
 	{
@@ -663,6 +670,9 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 		msg_Err(demux, "Invalid stream index detected: %d with %d streams", index, sys->streamCount);
 		return false;
 	}
+	
+	if(sys->stream[index - 1].es == 0)
+		return true;
 	
 	block_t *block = block_Alloc(binlen);
 	if(unlikely(block == 0))
@@ -680,23 +690,34 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 	
 	if(!htsmsg_get_s64(msg, "duration", &duration) && duration != 0)
 	{
-		//block->i_length = duration;
+		block->i_length = duration;
 	}
 
-	if(!htsmsg_get_u32(msg, "frametype", &frametype) && frametype != 0)
+	if(sys->stream[index - 1].fmt.i_cat == VIDEO_ES && !htsmsg_get_u32(msg, "frametype", &frametype) && frametype != 0)
 	{
 		char ft = (char)frametype;
+		
+		if(!sys->hadIFrame && ft != 'I')
+		{
+			block_Release(block);
+			return true;
+		}
+		
 		if(ft == 'I')
+		{
+			sys->hadIFrame = true;
 			block->i_flags = BLOCK_FLAG_TYPE_I;
+		}
 		else if(ft == 'B')
 			block->i_flags = BLOCK_FLAG_TYPE_B;
 		else if(ft == 'P')
 			block->i_flags = BLOCK_FLAG_TYPE_P;
 	}
 
-	//msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld", index, pts, dts, duration, frametype?frametype:'-', binlen);
-	
-	es_out_Control(demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, pts);
+	msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld, current mtime: %ld", index, pts, dts, duration, frametype?frametype:'-', binlen, mdate());
+
+	if(sys->stream[index - 1].fmt.i_cat == VIDEO_ES)
+		es_out_Control(demux->out, ES_OUT_SET_NEXT_DISPLAY_TIME, VLC_TS_0 + pts);
 	
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
 	
