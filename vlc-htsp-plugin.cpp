@@ -22,6 +22,7 @@
 #include <vlc_plugin.h>
 #include <vlc_demux.h>
 #include <vlc_access.h>
+#include <vlc_playlist.h>
 #include <vlc_url.h>
 #include <vlc_network.h>
 
@@ -29,6 +30,7 @@
 
 #include <deque>
 #include <string>
+#include <sstream>
 
 extern "C"
 {
@@ -374,6 +376,53 @@ bool ConnectHTSP(demux_t *demux)
 	return res;
 }
 
+void PopulatePlaylist(demux_t *demux)
+{
+	demux_sys_t *sys = demux->p_sys;
+	playlist_t *pl = pl_Get(demux);
+	
+	htsmsg_t *m = htsmsg_create_map();
+	htsmsg_add_str(m, "method", "enableAsyncMetadata");
+	if(!ReadSuccess(demux, m, "enable async metadata"))
+		return;
+	
+	while((m = ReadMessage(demux)) != 0)
+	{
+		std::string method = htsmsg_get_stdstr(m, "method");
+		if(method.empty() || method == "initialSyncCompleted")
+		{
+			msg_Info(demux, "Finished getting initial metadata sync");
+			break;
+		}
+		
+		if(method == "channelAdd")
+		{
+			uint32_t cid = 0;
+			if(htsmsg_get_u32(m, "channelId", &cid))
+				continue;
+			
+			std::string cname = htsmsg_get_stdstr(m, "channelName");
+			if(cname.empty())
+				continue;
+			
+			std::ostringstream oss;
+			oss << "htsp://";
+			if(!sys->username.empty() && !sys->password.empty())
+				oss << sys->username << ":" << sys->password << "@";
+			else if(!sys->username.empty())
+				oss << sys->username << "@";
+			oss << sys->host << ":" << sys->port << "/" << cid;
+			
+			playlist_Add(pl, oss.str().c_str(), cname.c_str(), PLAYLIST_INSERT, PLAYLIST_END, true, false);
+		}
+		
+		htsmsg_destroy(m);
+	}
+	
+	if(m)
+		htsmsg_destroy(m);
+}
+
 bool SubscribeHTSP(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -418,16 +467,10 @@ bool parseURL(demux_t *demux)
 	if(url->psz_password)
 		sys->password = url->psz_password;
 
-	if(url->psz_path == 0 || *(url->psz_path) == '\0')
-	{
-		msg_Err(demux, "Missing Channel ID!");
-		return false;
-	}
+	if(url->psz_path == 0 || *(url->psz_path) == '\0' || *(url->psz_path + 1) == '\0')
+		sys->channelId = 0;
 	else
 		sys->channelId = atoi(url->psz_path + 1); // Remove leading '/'
-
-	if(sys->channelId <= 0)
-		return false;
 		
 	return true;
 }
@@ -459,6 +502,11 @@ static int OpenHTSP(vlc_object_t *obj)
 		CloseHTSP(obj);
 		return VLC_EGENERIC;
 	}
+
+	PopulatePlaylist(demux);
+
+	if(sys->channelId == 0)
+		return VLC_SUCCESS;
 	
 	if(!SubscribeHTSP(demux))
 	{
@@ -466,7 +514,7 @@ static int OpenHTSP(vlc_object_t *obj)
 		CloseHTSP(obj);
 		return VLC_EGENERIC;
 	}
-
+	
 	sys->start = mdate();
 
 	return VLC_SUCCESS;
@@ -776,6 +824,10 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 
 static int DemuxHTSP(demux_t *demux)
 {
+	demux_sys_t *sys = demux->p_sys;
+	if(sys->channelId == 0)
+		return DEMUX_EOF;
+
 	htsmsg_t *msg = ReadMessage(demux);
 	if(!msg)
 		return DEMUX_EOF;
