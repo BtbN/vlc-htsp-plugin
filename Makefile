@@ -51,7 +51,7 @@ libhts:
 	make -C libhts all
 
 win32: libhts
-	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c vlc-htsp-plugin.cpp
+	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D__LIBVLC__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c vlc-htsp-plugin.cpp
 	$(CXX) -shared -o libhtsp_plugin.dll vlc-htsp-plugin.o win32/sdk/lib/libvlccore.dll.a libhts/libhts.a 
 
 .PHONY: all install install-strip uninstall clean mostlyclean libhts win32
