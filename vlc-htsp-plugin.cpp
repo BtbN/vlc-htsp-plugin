@@ -196,7 +196,7 @@ htsmsg_t * ReadMessage(demux_t *demux)
 	
 	if(net_Read(demux, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
 	{
-		msg_Err(demux, "Error reading from socket!");
+		msg_Err(demux, "Error reading from socket: %s", strerror(errno));
 		return 0;
 	}
 
