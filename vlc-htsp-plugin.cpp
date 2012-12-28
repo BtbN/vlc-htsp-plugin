@@ -492,7 +492,7 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching");
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
-			*va_arg(args, int64_t*) = mdate() - sys->start;
+			*va_arg(args, int64_t*) = sys->lastPcr - sys->start;
 		default:
 			return VLC_EGENERIC;
 	}
