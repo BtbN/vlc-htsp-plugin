@@ -56,10 +56,14 @@ struct hts_stream
 {
 	hts_stream()
 		:es(0)
+		,lastDts(0)
+		,lastPts(0)
 	{}
 
 	es_out_id_t *es;
 	es_format_t fmt;
+	mtime_t lastDts;
+	mtime_t lastPts;
 };
 
 struct demux_sys_t
@@ -373,7 +377,7 @@ bool SubscribeHTSP(demux_t *demux)
 	htsmsg_add_s32(m, "subscriptionId" , 1);
 	htsmsg_add_u32(m, "timeshiftPeriod", (uint32_t)~0);
 	//htsmsg_add_u32(m, "90khz", 1);
-	htsmsg_add_u32(m, "normts", 1);
+	//htsmsg_add_u32(m, "normts", 1);
 	
 	bool res = ReadSuccess(demux, m, "subscribe to channel");
 	if(res)
@@ -635,7 +639,7 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		sys->pcrStream = 1;
 	
 	es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0);
-	sys->lastPcr = 0;
+	sys->lastPcr = mdate();
 	
 	return true;
 }
@@ -715,6 +719,12 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 		block->i_length = duration;
 	}
 
+	if(pts)
+		sys->stream[index - 1].lastPts = pts;
+		
+	if(dts)
+		sys->stream[index - 1].lastPts = dts;
+	
 	if(sys->stream[index - 1].fmt.i_cat == VIDEO_ES && !htsmsg_get_u32(msg, "frametype", &frametype) && frametype != 0)
 	{
 		char ft = (char)frametype;
@@ -735,21 +745,23 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 		else if(ft == 'P')
 			block->i_flags = BLOCK_FLAG_TYPE_P;
 	}
-
-	//msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld, current mtime: %ld", index, pts, dts, duration, frametype?frametype:'-', binlen, mdate());
 	
-	if(index == sys->pcrStream)
+	if(index == sys->pcrStream && mdate() > sys->lastPcr + 100000)
 	{
 		mtime_t pcr = dts;
 		
-		if((pcr > sys->lastPcr + 100000 && pcr != VLC_TS_INVALID))
-		{
-			es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr - 100000);
-			msg_Dbg(demux, "Sent PCR %ld at %ld, diff %ld, index %d", pcr, mdate(), pcr - sys->lastPcr, index);
-			sys->lastPcr = pcr - 100000;
-		}
+		for(uint32_t i = 0; i < sys->streamCount; i++)
+			if(sys->stream[i].lastDts > 0 && sys->stream[i].lastDts < pcr)
+			{
+				pcr = sys->stream[i].lastDts;
+				sys->pcrStream = i + 1;
+				msg_Dbg(demux, "Using Stream %d instead of %d for dts!", i + 1, index);
+			}
+		
+		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr - 100000);
+		sys->lastPcr = mdate();
 	}
-	
+
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
 	
 	return true;
