@@ -34,16 +34,12 @@
 #include <string>
 #include <sstream>
 
-#ifdef WIN32 //Whoever made this neccessary...
-#define _MSC_VER
-#endif
 extern "C"
 {
 #include <libhts/sha1.h>
 #include <libhts/htsmsg.h>
 #include <libhts/htsmsg_binary.h>
 }
-#undef _MSC_VER
 
 static int OpenHTSP(vlc_object_t *);
 static void CloseHTSP(vlc_object_t *);
