@@ -126,6 +126,15 @@ struct demux_sys_t
 	bool hadIFrame;
 };
 
+#define DEMUX_EOF 0
+#define DEMUX_OK 1
+#define DEMUX_ERROR -1
+
+#define PTS_DELAY (INT64_C(100000))
+
+#define MAX_QUEUE_SIZE 1000
+#define READ_TIMEOUT 10
+
 /***************************************************
  ****       HTS Protocol Helper Functions       ****
  ***************************************************/
@@ -171,7 +180,6 @@ bool TransmitMessage(demux_t *demux, htsmsg_t *m)
 	return true;
 }
 
-#define READ_TIMEOUT 10
 htsmsg_t * ReadMessage(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -225,7 +233,6 @@ htsmsg_t * ReadMessage(demux_t *demux)
 	return htsmsg_binary_deserialize(buf, len, buf);
 }
 
-#define MAX_QUEUE_SIZE 1000
 htsmsg_t * ReadResult(demux_t *demux, htsmsg_t *m, bool sequence = true)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -489,7 +496,7 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			*va_arg(args, bool*) = false;
 			return VLC_SUCCESS;
 		case DEMUX_GET_PTS_DELAY:
-			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching");
+			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching") + PTS_DELAY;
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
 			*va_arg(args, int64_t*) = sys->lastPcr - sys->start;
@@ -746,7 +753,7 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 			block->i_flags = BLOCK_FLAG_TYPE_P;
 	}
 	
-	if(index == sys->pcrStream && mdate() > sys->lastPcr + 100000)
+	if(index == sys->pcrStream && mdate() > sys->lastPcr + PTS_DELAY)
 	{
 		mtime_t pcr = dts;
 		
@@ -758,7 +765,7 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 				msg_Dbg(demux, "Using Stream %d instead of %d for dts!", i + 1, index);
 			}
 		
-		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr - 100000);
+		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr - PTS_DELAY);
 		sys->lastPcr = mdate();
 	}
 
@@ -767,9 +774,6 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 	return true;
 }
 
-#define DEMUX_EOF 0
-#define DEMUX_OK 1
-#define DEMUX_ERROR -1
 static int DemuxHTSP(demux_t *demux)
 {
 	htsmsg_t *msg = ReadMessage(demux);
