@@ -28,6 +28,7 @@
 
 #include <libavcodec/avcodec.h>
 
+#include <list>
 #include <deque>
 #include <string>
 #include <sstream>
@@ -376,6 +377,20 @@ bool ConnectHTSP(demux_t *demux)
 	return res;
 }
 
+struct tmp_channel
+{
+	std::string name;
+	uint32_t cid;
+	std::string url;
+};
+
+bool compare_tmp_channel(tmp_channel first, tmp_channel second)
+{
+	if(first.cid < second.cid)
+		return true;
+	return false;
+}
+
 void PopulatePlaylist(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -385,6 +400,8 @@ void PopulatePlaylist(demux_t *demux)
 	htsmsg_add_str(m, "method", "enableAsyncMetadata");
 	if(!ReadSuccess(demux, m, "enable async metadata"))
 		return;
+	
+	std::list<tmp_channel> channels;
 	
 	while((m = ReadMessage(demux)) != 0)
 	{
@@ -405,6 +422,10 @@ void PopulatePlaylist(demux_t *demux)
 			if(cname.empty())
 				continue;
 			
+			uint32_t cnum = 0;
+			if(htsmsg_get_u32(m, "channelNumber", &cnum))
+				continue;
+			
 			std::ostringstream oss;
 			oss << "htsp://";
 			if(!sys->username.empty() && !sys->password.empty())
@@ -413,7 +434,11 @@ void PopulatePlaylist(demux_t *demux)
 				oss << sys->username << "@";
 			oss << sys->host << ":" << sys->port << "/" << cid;
 			
-			playlist_Add(pl, oss.str().c_str(), cname.c_str(), PLAYLIST_INSERT, PLAYLIST_END, true, false);
+			tmp_channel ch;
+			ch.name = cname;
+			ch.cid = cnum;
+			ch.url = oss.str();
+			channels.push_back(ch);
 		}
 		
 		htsmsg_destroy(m);
@@ -421,6 +446,17 @@ void PopulatePlaylist(demux_t *demux)
 	
 	if(m)
 		htsmsg_destroy(m);
+	
+	channels.sort(compare_tmp_channel);
+	
+	playlist_Clear(pl, false);
+	while(channels.size() > 0)
+	{
+		tmp_channel ch = channels.front();
+		channels.pop_front();
+		
+		playlist_Add(pl, ch.url.c_str(), ch.name.c_str(), PLAYLIST_INSERT, PLAYLIST_END, true, false);
+	}
 }
 
 bool SubscribeHTSP(demux_t *demux)
@@ -503,10 +539,11 @@ static int OpenHTSP(vlc_object_t *obj)
 		return VLC_EGENERIC;
 	}
 
-	PopulatePlaylist(demux);
-
 	if(sys->channelId == 0)
+	{
+		PopulatePlaylist(demux);
 		return VLC_SUCCESS;
+	}
 	
 	if(!SubscribeHTSP(demux))
 	{
