@@ -1,1 +1,1 @@
-Copy the vlc sdk folder in here, you then need cygwin to build the whole module using make win32
+Copy the vlc sdk folder in here, then build using MinGW-MSYS, run "make win32".

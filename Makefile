@@ -14,11 +14,11 @@ plugindir = $(libdir)/vlc/plugins
 
 override CFLAGS += -DMODULE_STRING=\"htsp\" $(VLC_PLUGIN_CFLAGS)
 override CXXFLAGS += -DMODULE_STRING=\"htsp\" $(VLC_PLUGIN_CFLAGS)
-override LDFLAGS += $(VLC_PLUGIN_LIBS) libhts/libhts.a
+override LDFLAGS += $(VLC_PLUGIN_LIBS)
 
 TARGETS = libhtsp_plugin.so
 C_SOURCES = 
-CXX_SOURCES = vlc-htsp-plugin.cpp
+CXX_SOURCES = vlc-htsp-plugin.cpp htsmessage.cpp
 
 all: libhtsp_plugin.so
 
@@ -33,8 +33,7 @@ uninstall:
 	rm -f $(plugindir)/codec/libhtsp_plugin.so
 
 clean:
-	rm -f -- libhtsp_plugin.so *.o
-	make -C libhts clean
+	rm -f -- libhtsp_plugin.* *.o
 
 mostlyclean: clean
 
@@ -44,15 +43,12 @@ mostlyclean: clean
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $<
 
-libhtsp_plugin.so: libhts $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o)
+libhtsp_plugin.so: $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o)
 	$(CXX) -shared -o $@ $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o) $(LDFLAGS)
 
-libhts:
-	make -C libhts all
+win32:
+	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c vlc-htsp-plugin.cpp htsmessage.cpp
+	$(CXX) -shared -o libhtsp_plugin.dll vlc-htsp-plugin.o htsmessage.o win32/sdk/lib/libvlccore.dll.a
 
-win32: libhts
-	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D__LIBVLC__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c vlc-htsp-plugin.cpp
-	$(CXX) -shared -o libhtsp_plugin.dll vlc-htsp-plugin.o win32/sdk/lib/libvlccore.dll.a libhts/libhts.a 
-
-.PHONY: all install install-strip uninstall clean mostlyclean libhts win32
+.PHONY: all install install-strip uninstall clean mostlyclean win32
 
