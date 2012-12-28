@@ -2,3 +2,4 @@ libhts/*.o
 libhts/*.a
 *.o
 *.so
+win32/sdk/

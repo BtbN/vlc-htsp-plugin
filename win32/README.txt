@@ -1,0 +1,1 @@
+Copy the vlc sdk folder in here, you then need cygwin to build the whole module using make win32

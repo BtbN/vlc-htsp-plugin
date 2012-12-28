@@ -26,19 +26,24 @@
 #include <vlc_url.h>
 #include <vlc_network.h>
 
-#include <libavcodec/avcodec.h>
+#include <ctime>
+#include <cerrno>
 
 #include <list>
 #include <deque>
 #include <string>
 #include <sstream>
 
+#ifdef WIN32 //Whoever made this neccessary...
+#define _MSC_VER
+#endif
 extern "C"
 {
 #include <libhts/sha1.h>
 #include <libhts/htsmsg.h>
 #include <libhts/htsmsg_binary.h>
 }
+#undef _MSC_VER
 
 static int OpenHTSP(vlc_object_t *);
 static void CloseHTSP(vlc_object_t *);
@@ -212,7 +217,7 @@ htsmsg_t * ReadMessage(demux_t *demux)
 	
 	ssize_t read;
 	char *wbuf = buf;
-	uint32_t tlen = len;
+	ssize_t tlen = len;
 	time_t start = time(0);
 	while((read = net_Read(demux, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
 	{
