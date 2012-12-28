@@ -373,7 +373,7 @@ bool SubscribeHTSP(demux_t *demux)
 	htsmsg_add_s32(m, "subscriptionId" , 1);
 	htsmsg_add_u32(m, "timeshiftPeriod", (uint32_t)~0);
 	//htsmsg_add_u32(m, "90khz", 1);
-	//htsmsg_add_u32(m, "normts", 1);
+	htsmsg_add_u32(m, "normts", 1);
 	
 	bool res = ReadSuccess(demux, m, "subscribe to channel");
 	if(res)
@@ -737,19 +737,17 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 	}
 
 	//msg_Dbg(demux, "Got demux for stream %d, pts %ld, dts %ld, duration %ld, frametype '%c', size %ld, current mtime: %ld", index, pts, dts, duration, frametype?frametype:'-', binlen, mdate());
-
+	
 	if(index == sys->pcrStream)
 	{
-		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + dts);
-	
-		/* mtime_t pcr = dts;
+		mtime_t pcr = dts;
 		
-		if(pcr > sys->lastPcr + 300000 && pcr != VLC_TS_INVALID)
+		if((pcr > sys->lastPcr + 100000 && pcr != VLC_TS_INVALID))
 		{
-			es_out_Control(demux->out, ES_OUT_SET_PCR, pcr);
-			msg_Dbg(demux, "Sent PCR %ld", dts);
-			sys->lastPcr = pcr;
-		} */
+			es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr - 100000);
+			msg_Dbg(demux, "Sent PCR %ld at %ld, diff %ld, index %d", pcr, mdate(), pcr - sys->lastPcr, index);
+			sys->lastPcr = pcr - 100000;
+		}
 	}
 	
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
