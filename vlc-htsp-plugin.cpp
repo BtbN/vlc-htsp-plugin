@@ -73,6 +73,7 @@ struct demux_sys_t
 		:start(0)
 		,pcrStream(0)
 		,lastPcr(0)
+		,ptsDelay(1500000)
 		,netfd(0)
 		,streamCount(0)
 		,stream(0)
@@ -99,6 +100,7 @@ struct demux_sys_t
 	mtime_t start;
 	uint32_t pcrStream;
 	mtime_t lastPcr;
+	mtime_t ptsDelay;
 
 	int netfd;
 
@@ -126,8 +128,6 @@ struct demux_sys_t
 #define DEMUX_EOF 0
 #define DEMUX_OK 1
 #define DEMUX_ERROR -1
-
-#define PTS_DELAY (INT64_C(100000))
 
 #define MAX_QUEUE_SIZE 1000
 #define READ_TIMEOUT 10
@@ -550,10 +550,11 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			*va_arg(args, bool*) = false;
 			return VLC_SUCCESS;
 		case DEMUX_GET_PTS_DELAY:
-			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching") + PTS_DELAY;
+			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching") + sys->ptsDelay;
+			msg_Dbg(demux, "VLC Requested PTS_DELAY!");
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
-			*va_arg(args, int64_t*) = sys->lastPcr - sys->start;
+			*va_arg(args, int64_t*) = sys->lastPcr;
 		default:
 			return VLC_EGENERIC;
 	}
@@ -589,6 +590,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 	sys->stream = new hts_stream[sys->streamCount];
 	sys->hadIFrame = false;
 	sys->pcrStream = 0;
+	sys->lastPcr = 0;
 
 	for(uint32_t jj = 0; jj < streams.count(); jj++)
 	{
@@ -688,9 +690,6 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 	if(sys->pcrStream == 0)
 		sys->pcrStream = 1;
 
-	es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0);
-	sys->lastPcr = mdate();
-
 	return true;
 }
 
@@ -786,11 +785,10 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	if(duration != 0)
 		block->i_length = duration;
 
-	if(pts)
+	if(pts > 0)
 		sys->stream[index - 1].lastPts = pts;
-
-	if(dts)
-		sys->stream[index - 1].lastPts = dts;
+	if(dts > 0)
+		sys->stream[index - 1].lastDts = dts;
 
 	frametype = msg.getRoot().getU32("frametype");
 	if(sys->stream[index - 1].fmt.i_cat == VIDEO_ES && frametype != 0)
@@ -815,19 +813,33 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 			block->i_flags = BLOCK_FLAG_TYPE_P;
 	}
 
-	if(index == sys->pcrStream && mdate() > sys->lastPcr + PTS_DELAY)
+	/*mtime_t pcr = 0;
+	mtime_t bpcr = 0;
+	int bstream = 0, nbstream = 0;
+	for(uint32_t i = 0; i < sys->streamCount; i++)
 	{
-		mtime_t pcr = dts;
+		if(sys->stream[i].lastDts > 0 && (sys->stream[i].lastDts < pcr || pcr == 0))
+		{
+			pcr = sys->stream[i].lastDts;
+			nbstream = i+1;
+		}
+		if(sys->stream[i].lastPts > 0 && (sys->stream[i].lastDts > bpcr || pcr == 0))
+		{
+			bpcr = sys->stream[i].lastDts;
+			bstream = i+1;
+		}
+	}
 
-		for(uint32_t i = 0; i < sys->streamCount; i++)
-			if(sys->stream[i].lastDts > 0 && sys->stream[i].lastDts < pcr)
-			{
-				pcr = sys->stream[i].lastDts;
-				sys->pcrStream = i + 1;
-				msg_Dbg(demux, "Using Stream %d instead of %d for dts!", i + 1, index);
-			}
-
-		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr - PTS_DELAY);
+	if(pcr > sys->lastPcr + sys->ptsDelay && pcr > 0)
+	{
+		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr);
+		sys->lastPcr = pcr;
+		msg_Dbg(demux, "Sent PCR %ld from stream %d, biggest current pcr is %ld from stream %d, diff %ld with a delay of %ld", pcr, nbstream, bpcr, bstream, bpcr - pcr, sys->ptsDelay);
+	}*/
+	
+	if(index == sys->pcrStream && dts && sys->lastPcr < mdate() - 300000)
+	{
+		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + dts - sys->ptsDelay);
 		sys->lastPcr = mdate();
 	}
 

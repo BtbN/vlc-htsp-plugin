@@ -3,8 +3,8 @@ LD = ld
 CC = gcc
 CXX = g++
 INSTALL = install
-CFLAGS = -g -pipe -O2 -Wall -Wextra -std=gnu99 -DPIC -fPIC -I.
-CXXFLAGS = -g -pipe -O2 -Wall -Wextra -std=gnu++0x -DPIC -fPIC -I.
+CFLAGS = -pipe -O2 -Wall -Wextra -std=gnu99 -DPIC -fPIC -I.
+CXXFLAGS = -pipe -O2 -Wall -Wextra -std=gnu++0x -DPIC -fPIC -I.
 LDFLAGS = -Wl,-no-undefined,-z,defs
 VLC_PLUGIN_CFLAGS := $(shell pkg-config --cflags vlc-plugin)
 VLC_PLUGIN_LIBS := $(shell pkg-config --libs vlc-plugin)
