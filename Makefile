@@ -33,7 +33,7 @@ uninstall:
 	rm -f $(plugindir)/codec/libhtsp_plugin.so
 
 clean:
-	rm -f -- libhtsp_plugin.* *.o
+	rm -f -- libhtsp_plugin.{dll,so} *.o
 
 mostlyclean: clean
 
@@ -48,7 +48,7 @@ libhtsp_plugin.so: $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o)
 
 win32:
 	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c vlc-htsp-plugin.cpp htsmessage.cpp
-	$(CXX) -shared -o libhtsp_plugin.dll vlc-htsp-plugin.o htsmessage.o win32/sdk/lib/libvlccore.dll.a
+	$(CXX) -shared -o libhtsp_plugin.dll vlc-htsp-plugin.o htsmessage.o win32/sdk/lib/libvlccore.dll.a -lws2_32 -lm
 
 .PHONY: all install install-strip uninstall clean mostlyclean win32
 

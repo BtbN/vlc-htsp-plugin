@@ -34,12 +34,7 @@
 #include <string>
 #include <sstream>
 
-extern "C"
-{
-#include <libhts/sha1.h>
-#include <libhts/htsmsg.h>
-#include <libhts/htsmsg_binary.h>
-}
+#include "htsmessage.h"
 
 static int OpenHTSP(vlc_object_t *);
 static void CloseHTSP(vlc_object_t *);
@@ -84,7 +79,7 @@ struct demux_sys_t
 		,username("")
 		,password("")
 		,channelId(0)
-		,nextSeqNum(0)
+		,nextSeqNum(1)
 		,hadIFrame(false)
 	{}
 	
@@ -92,11 +87,7 @@ struct demux_sys_t
 	{
 		if(stream)
 			delete[] stream;
-	
-		for(std::deque<htsmsg_t*>::iterator it = queue.begin(); it != queue.end(); it++)
-			htsmsg_destroy(*it);
-		queue.clear();
-			
+
 		if(netfd >= 0)
 			net_Close(netfd);
 
@@ -125,7 +116,7 @@ struct demux_sys_t
 	int32_t protoVersion;
 
 	uint32_t nextSeqNum;
-	std::deque<htsmsg_t*> queue;
+	std::deque<HtsMessage> queue;
 	
 	bool hadIFrame;
 };
@@ -143,23 +134,15 @@ struct demux_sys_t
  ****       HTS Protocol Helper Functions       ****
  ***************************************************/
 
-std::string htsmsg_get_stdstr(htsmsg_t *m, const char *n)
-{
-	const char* r = htsmsg_get_str(m, n);
-	if(r == 0)
-		return std::string();
-	return r;
-}
-
 uint32_t HTSPNextSeqNum(demux_sys_t *sys)
 {
 	uint32_t res = sys->nextSeqNum++;
 	if(sys->nextSeqNum > 2147483647)
-		sys->nextSeqNum = 0;
+		sys->nextSeqNum = 1;
 	return res;
 }
 
-bool TransmitMessage(demux_t *demux, htsmsg_t *m)
+bool TransmitMessage(demux_t *demux, HtsMessage m)
 {
 	demux_sys_t *sys = demux->p_sys;
 
@@ -167,14 +150,10 @@ bool TransmitMessage(demux_t *demux, htsmsg_t *m)
 		return false;
 	
 	void *buf;
-	size_t len;
+	uint32_t len;
 
-	if(htsmsg_binary_serialize(m, &buf, &len, -1) < 0)
-	{
-		htsmsg_destroy(m);
+	if(!m.Serialize(&len, &buf))
 		return false;
-	}
-	htsmsg_destroy(m);
 
 	if(net_Write(demux, sys->netfd, NULL, buf, len) != (ssize_t)len)
 		return false;
@@ -184,7 +163,7 @@ bool TransmitMessage(demux_t *demux, htsmsg_t *m)
 	return true;
 }
 
-htsmsg_t * ReadMessage(demux_t *demux)
+HtsMessage ReadMessage(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
 
@@ -193,7 +172,7 @@ htsmsg_t * ReadMessage(demux_t *demux)
 	
 	if(sys->queue.size())
 	{
-		htsmsg_t *res = sys->queue.front();
+		HtsMessage res = sys->queue.front();
 		sys->queue.pop_front();
 		return res;
 	}
@@ -201,13 +180,13 @@ htsmsg_t * ReadMessage(demux_t *demux)
 	if(net_Read(demux, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
 	{
 		msg_Err(demux, "Error reading from socket: %s", strerror(errno));
-		return 0;
+		return HtsMessage();
 	}
 
 	len = ntohl(len);
 	
 	if(len == 0)
-		return htsmsg_create_map();
+		return HtsMessage();
 		
 	buf = (char*)malloc(len);
 	
@@ -224,20 +203,20 @@ htsmsg_t * ReadMessage(demux_t *demux)
 		{
 			msg_Err(demux, "Read timeout!");
 			free(buf);
-			return 0;
+			return HtsMessage();
 		}
 	}
 	if(read > tlen)
 	{
 		msg_Dbg(demux, "WTF");
 		free(buf);
-		return 0;
+		return HtsMessage();
 	}
 	
-	return htsmsg_binary_deserialize(buf, len, buf);
+	return HtsMessage::Deserialize(len, buf);
 }
 
-htsmsg_t * ReadResult(demux_t *demux, htsmsg_t *m, bool sequence = true)
+HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 {
 	demux_sys_t *sys = demux->p_sys;
 
@@ -245,21 +224,20 @@ htsmsg_t * ReadResult(demux_t *demux, htsmsg_t *m, bool sequence = true)
 	if(sequence)
 	{
 		iSequence = HTSPNextSeqNum(sys);
-		htsmsg_add_u32(m, "seq", iSequence);
+		m.getRoot().setData("seq", HtsInt(iSequence));
 	}
 	
 	if(!TransmitMessage(demux, m))
-		return 0;
+		return HtsMessage();
 	
-	std::deque<htsmsg_t*> queue;
+	std::deque<HtsMessage> queue;
 	sys->queue.swap(queue);
 	
-	while((m = ReadMessage(demux)))
+	while((m = ReadMessage(demux)).isValid())
 	{
-		uint32_t seq;
 		if(!sequence)
 			break;
-		if(!htsmsg_get_u32(m, "seq", &seq) && seq == iSequence)
+		if(m.getRoot().contains("seq") && m.getRoot().getU32("seq") == iSequence)
 			break;
 		
 		queue.push_back(m);
@@ -267,41 +245,36 @@ htsmsg_t * ReadResult(demux_t *demux, htsmsg_t *m, bool sequence = true)
 		{
 			msg_Dbg(demux, "Max queue size reached!");
 			sys->queue.swap(queue);
-			return 0;
+			return HtsMessage();
 		}
 	}
 	
 	sys->queue.swap(queue);
 	
-	if(!m)
-		return 0;
+	if(!m.isValid())
+		return HtsMessage();
 	
-	const char *error;
-	if((error = htsmsg_get_str(m, "error")))
+	if(m.getRoot().contains("error"))
 	{
-		msg_Err(demux, "HTSP Error: %s", error);
-		htsmsg_destroy(m);
-		return 0;
+		msg_Err(demux, "HTSP Error: %s", m.getRoot().getStr("error").c_str());
+		return HtsMessage();
 	}
-	uint32_t noaccess;
-	if(!htsmsg_get_u32(m, "noaccess", &noaccess) && noaccess)
+	if(m.getRoot().getU32("noaccess") != 0)
 	{
 		msg_Err(demux, "Access Denied");
-		htsmsg_destroy(m);
-		return 0;
+		return HtsMessage();
 	}
 	
 	return m;
 }
 
-bool ReadSuccess(demux_t *demux, htsmsg_t *m, const std::string &action, bool sequence = true)
+bool ReadSuccess(demux_t *demux, HtsMessage m, const std::string &action, bool sequence = true)
 {
-	if((m = ReadResult(demux, m, sequence)) == 0)
+	if(!ReadResult(demux, m, sequence).isValid())
 	{
 		msg_Err(demux, "ReadSuccess - failed to %s", action.c_str());
 		return false;
 	}
-	htsmsg_destroy(m);
 	return true;
 }
 
@@ -318,59 +291,53 @@ bool ConnectHTSP(demux_t *demux)
 	if(sys->netfd < 0)
 		return false;
 
-	htsmsg_t *m;
+	HtsMap map;
+	map.setData("method", HtsStr("hello"));
+	map.setData("clientname", HtsStr("VLC media player"));
+	map.setData("htspversion", HtsInt(7));
 
-	m = htsmsg_create_map();
-	htsmsg_add_str(m, "method", "hello");
-	htsmsg_add_str(m, "clientname", "VLC media player");
-	htsmsg_add_u32(m, "htspversion", 7);
-
-	if((m = ReadResult(demux, m)) == 0)
+	HtsMessage m = ReadResult(demux, map.makeMsg());
+	if(!m.isValid())
 		return false;
 
 	size_t chall_len;
-	const void * chall;
+	void * chall;
 		
-	sys->serverName = htsmsg_get_stdstr(m, "servername");
-	sys->serverVersion = htsmsg_get_stdstr(m, "serverversion");
-	htsmsg_get_s32(m, "htspversion", &(sys->protoVersion));
-	htsmsg_get_bin(m, "challenge", &chall, &chall_len);
-	
-	void * lchall = 0;
-	if(chall && chall_len)
-		lchall = memcpy(malloc(chall_len), chall, chall_len);
+	sys->serverName = m.getRoot().getStr("servername");
+	sys->serverVersion = m.getRoot().getStr("serverversion");
+	sys->protoVersion = m.getRoot().getU32("htspversion");
+	m.getRoot().getBin("challenge", &chall_len, &chall);
 	
 	msg_Info(demux, "Connected to HTSP Server %s, version %s, protocol %d", sys->serverName.c_str(), sys->serverVersion.c_str(), sys->protoVersion);
-	
-	htsmsg_destroy(m);
 	
 	if(sys->username.empty())
 		return true;
 	
-	m = htsmsg_create_map();
-	htsmsg_add_str(m, "method"  , "authenticate");
-	htsmsg_add_str(m, "username", sys->username.c_str());
+	map = HtsMap();
+	map.setData("method", HtsStr("authenticate"));
+	map.setData("username", HtsStr(sys->username));
 	
-	if(sys->password != "" && lchall)
+	if(sys->password != "" && chall)
 	{
 		msg_Info(demux, "Authenticating as '%s' with a password", sys->username.c_str());
 
-		HTSSHA1 *shactx = (HTSSHA1*)malloc(hts_sha1_size);
+		// !!!TODO!!!
+		/* HTSSHA1 *shactx = (HTSSHA1*)malloc(hts_sha1_size);
 		uint8_t d[20];
 		hts_sha1_init(shactx);
 		hts_sha1_update(shactx, (const uint8_t *)(sys->password.c_str()), sys->password.length());
-		hts_sha1_update(shactx, (const uint8_t *)lchall, chall_len);
+		hts_sha1_update(shactx, (const uint8_t *)chall, chall_len);
 		hts_sha1_final(shactx, d);
 		htsmsg_add_bin(m, "digest", d, 20);
-		free(shactx);
+		free(shactx); */
 	}
 	else
 		msg_Info(demux, "Authenticating as '%s' without a password", sys->username.c_str());
 	
-	if(lchall)
-		free(lchall);
+	if(chall)
+		free(chall);
 
-	bool res = ReadSuccess(demux, m, "authenticate");
+	bool res = ReadSuccess(demux, map.makeMsg(), "authenticate");
 	if(res)
 		msg_Info(demux, "Successfully authenticated!");
 	else
@@ -397,16 +364,17 @@ void PopulatePlaylist(demux_t *demux)
 	demux_sys_t *sys = demux->p_sys;
 	playlist_t *pl = pl_Get(demux);
 	
-	htsmsg_t *m = htsmsg_create_map();
-	htsmsg_add_str(m, "method", "enableAsyncMetadata");
-	if(!ReadSuccess(demux, m, "enable async metadata"))
+	HtsMap map;
+	map.setData("method", HtsStr("enableAsyncMetadata"));
+	if(!ReadSuccess(demux, map.makeMsg(), "enable async metadata"))
 		return;
 	
 	std::list<tmp_channel> channels;
 	
-	while((m = ReadMessage(demux)) != 0)
+	HtsMessage m;
+	while((m = ReadMessage(demux)).isValid())
 	{
-		std::string method = htsmsg_get_stdstr(m, "method");
+		std::string method = m.getRoot().getStr("method");
 		if(method.empty() || method == "initialSyncCompleted")
 		{
 			msg_Info(demux, "Finished getting initial metadata sync");
@@ -415,17 +383,17 @@ void PopulatePlaylist(demux_t *demux)
 		
 		if(method == "channelAdd")
 		{
-			uint32_t cid = 0;
-			if(htsmsg_get_u32(m, "channelId", &cid))
+			if(!m.getRoot().contains("channelId"))
 				continue;
+			uint32_t cid = m.getRoot().getU32("channelId");
 			
-			std::string cname = htsmsg_get_stdstr(m, "channelName");
+			std::string cname = m.getRoot().getStr("channelName");
 			if(cname.empty())
 				continue;
 			
-			uint32_t cnum = 0;
-			if(htsmsg_get_u32(m, "channelNumber", &cnum))
+			if(!m.getRoot().contains("channelNumber"))
 				continue;
+			uint32_t cnum = m.getRoot().getU32("channelNumber");
 			
 			std::ostringstream oss;
 			oss << "htsp://";
@@ -441,12 +409,7 @@ void PopulatePlaylist(demux_t *demux)
 			ch.url = oss.str();
 			channels.push_back(ch);
 		}
-		
-		htsmsg_destroy(m);
 	}
-	
-	if(m)
-		htsmsg_destroy(m);
 	
 	channels.sort(compare_tmp_channel);
 	
@@ -464,15 +427,15 @@ bool SubscribeHTSP(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
 	
-	htsmsg_t *m = htsmsg_create_map();
-	htsmsg_add_str(m, "method"         , "subscribe");
-	htsmsg_add_s32(m, "channelId"      , sys->channelId);
-	htsmsg_add_s32(m, "subscriptionId" , 1);
-	htsmsg_add_u32(m, "timeshiftPeriod", (uint32_t)~0);
-	//htsmsg_add_u32(m, "90khz", 1);
-	//htsmsg_add_u32(m, "normts", 1);
+	HtsMap map;
+	map.setData("method", HtsStr("subscribe"));
+	map.setData("channelId", HtsInt(sys->channelId));
+	map.setData("subscriptionId", HtsInt(1));
+	map.setData("timeshiftPeriod", HtsInt((uint32_t)~0));
+	//map.setData("90khz", HtsInt(1));
+	//map.setData("normts", HtsInt(1));
 	
-	bool res = ReadSuccess(demux, m, "subscribe to channel");
+	bool res = ReadSuccess(demux, map.makeMsg(), "subscribe to channel");
 	if(res)
 		msg_Info(demux, "Successfully subscribed to channel %d", sys->channelId);
 	return res;
@@ -595,7 +558,7 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
  ****       Actual Demuxing Work Functions      ****
  ***************************************************/
 
-bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
+bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
 
@@ -608,39 +571,34 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		sys->streamCount = 0;
 	}
 
-	htsmsg_t *streams;
-	htsmsg_field_t *f;
-	if((streams = htsmsg_get_list(msg, "streams")) == 0)
+	HtsList streams = msg.getRoot().getList("streams");
+	if(streams.count() <= 0)
 	{
 		msg_Err(demux, "Malformed SubscriptionStart!");
 		return false;
 	}
 	
-	sys->streamCount = 0;
-	HTSMSG_FOREACH(f, streams)
-		sys->streamCount++;
+	sys->streamCount = streams.count();
 	msg_Dbg(demux, "Found %d elementary streams", sys->streamCount);
 	
 	sys->stream = new hts_stream[sys->streamCount];
 	sys->hadIFrame = false;
 	sys->pcrStream = 0;
 	
-	HTSMSG_FOREACH(f, streams)
+	for(uint32_t jj = 0; jj < streams.count(); jj++)
 	{
-		uint32_t index;
-		std::string type;
-		htsmsg_t *sub;
-		
-		if(f->hmf_type != HMF_MAP)
+		HtsData sub = streams.getData(jj);
+		if(!sub.isMap())
 			continue;
-		sub = &f->hmf_msg;
+		HtsMap &map = static_cast<HtsMap&>(sub);
 		
-		type = htsmsg_get_stdstr(sub, "type");
+		std::string type = map.getStr("type");
 		if(type.empty())
 			continue;
 		
-		if(htsmsg_get_u32(sub, "index", &index))
+		if(!map.contains("index"))
 			continue;
+		uint32_t index = map.getU32("index");
 		int i = index - 1;
 		
 		es_format_t *fmt = &(sys->stream[i].fmt);
@@ -695,23 +653,17 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 		{
 			if(sys->pcrStream == 0)
 				sys->pcrStream = index;
-		
-			uint32_t tmp;
-			if(!htsmsg_get_u32(sub, "width", &tmp) && tmp != 0)
-				fmt->video.i_width = tmp;
-			if(!htsmsg_get_u32(sub, "height", &tmp) && tmp != 0)
-				fmt->video.i_height = tmp;
+
+			fmt->video.i_width = map.getU32("width");
+			fmt->video.i_height = map.getU32("height");
 		}
 		else if(fmt->i_cat == AUDIO_ES)
 		{
-			uint32_t tmp;
-			if(!htsmsg_get_u32(sub, "channels", &tmp) && tmp != 0)
-				fmt->audio.i_physical_channels = tmp;
-			if(!htsmsg_get_u32(sub, "rate", &tmp) && tmp != 0)
-				fmt->audio.i_rate = tmp;
+			fmt->audio.i_physical_channels = map.getU32("channels");
+			fmt->audio.i_rate = map.getU32("rate");
 		}
 		
-		std::string lang = htsmsg_get_stdstr(sub, "language");
+		std::string lang = map.getStr("language");
 		if(!lang.empty())
 		{
 			fmt->psz_language = (char*)malloc(lang.length()+1);
@@ -737,80 +689,97 @@ bool ParseSubscriptionStart(demux_t *demux, htsmsg_t *msg)
 	return true;
 }
 	
-bool ParseSubscriptionStop(demux_t *demux, htsmsg_t *msg)
+bool ParseSubscriptionStop(demux_t *demux, HtsMessage &msg)
 {
 	VLC_UNUSED(demux);
 	VLC_UNUSED(msg);
 	return false;
 }
 
-bool ParseSubscriptionStatus(demux_t *demux, htsmsg_t *msg)
+bool ParseSubscriptionStatus(demux_t *demux, HtsMessage &msg)
 {
 	VLC_UNUSED(demux);
 	VLC_UNUSED(msg);
 	return true;
 }
 
-bool ParseQueueStatus(demux_t *demux, htsmsg_t *msg)
+bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 {
 	VLC_UNUSED(demux);
 	VLC_UNUSED(msg);
 	return true;
 }
 
-bool ParseSignalStatus(demux_t *demux, htsmsg_t *msg)
+bool ParseSignalStatus(demux_t *demux, HtsMessage &msg)
 {
 	VLC_UNUSED(demux);
 	VLC_UNUSED(msg);
 	return true;
 }
 
-bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
+bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
 
-	uint32_t index = 0;
-	const void *bin = 0;
-	size_t binlen = 0;
+	uint32_t index = msg.getRoot().getU32("stream");
+	
+	void *bin = 0;
+	uint32_t binlen = 0;
+	msg.getRoot().getBin("payload", &binlen, &bin);
+	
 	int64_t pts = 0;
 	int64_t dts = 0;
-	int64_t duration = 0;
+	
 	uint32_t frametype = 0;
 	
-	if(htsmsg_get_u32(msg, "stream", &index) || htsmsg_get_bin(msg, "payload", &bin, &binlen))
+	if(bin == 0)
 	{
+		msg_Err(demux, "Malformed Mux Packet!");
+		return false;
+	}
+	
+	if(index == 0 || binlen == 0)
+	{
+		free(bin);
 		msg_Err(demux, "Malformed Mux Packet!");
 		return false;
 	}
 	
 	if(index > sys->streamCount || index == 0)
 	{
-		htsmsg_print(msg);
+		free(bin);
 		msg_Err(demux, "Invalid stream index detected: %d with %d streams", index, sys->streamCount);
 		return false;
 	}
 	
 	if(sys->stream[index - 1].es == 0)
+	{
+		free(bin);
 		return true;
+	}
 	
 	block_t *block = block_Alloc(binlen);
 	if(unlikely(block == 0))
+	{
+		free(bin);
 		return false;
+	}
 	
 	memcpy(block->p_buffer, bin, binlen);
+	free(bin);
+	bin = 0;
 	
-	block->i_pts = VLC_TS_INVALID;
-	if(!htsmsg_get_s64(msg, "pts", &pts) && pts != 0)
-		block->i_pts = pts;
+	pts = block->i_pts = VLC_TS_INVALID;
+	if(msg.getRoot().contains("pts"))
+		pts = block->i_pts = msg.getRoot().getS64("pts");
 	
-	block->i_dts = VLC_TS_INVALID;
-	if(!htsmsg_get_s64(msg, "dts", &dts) && dts != 0)
-		block->i_dts = dts;
+	dts = block->i_dts = VLC_TS_INVALID;
+	if(msg.getRoot().contains("dts"))
+		dts = block->i_dts = msg.getRoot().getS64("dts");
 	
-	if(!htsmsg_get_s64(msg, "duration", &duration) && duration != 0)
-	{
+	int64_t duration = msg.getRoot().getS64("duration");
+	if(duration != 0)
 		block->i_length = duration;
-	}
 
 	if(pts)
 		sys->stream[index - 1].lastPts = pts;
@@ -818,13 +787,15 @@ bool ParseMuxPacket(demux_t *demux, htsmsg_t *msg)
 	if(dts)
 		sys->stream[index - 1].lastPts = dts;
 	
-	if(sys->stream[index - 1].fmt.i_cat == VIDEO_ES && !htsmsg_get_u32(msg, "frametype", &frametype) && frametype != 0)
+	frametype = msg.getRoot().getU32("frametype");
+	if(sys->stream[index - 1].fmt.i_cat == VIDEO_ES && frametype != 0)
 	{
 		char ft = (char)frametype;
 		
 		if(!sys->hadIFrame && ft != 'I')
 		{
 			block_Release(block);
+			free(bin);
 			return true;
 		}
 		
@@ -866,29 +837,22 @@ static int DemuxHTSP(demux_t *demux)
 	if(sys->channelId == 0)
 		return DEMUX_EOF;
 
-	htsmsg_t *msg = ReadMessage(demux);
-	if(!msg)
+	HtsMessage msg = ReadMessage(demux);
+	if(!msg.isValid())
 		return DEMUX_EOF;
 	
-	std::string method = htsmsg_get_stdstr(msg, "method");
+	std::string method = msg.getRoot().getStr("method");
 	if(method.empty())
-	{
-		htsmsg_destroy(msg);
 		return DEMUX_ERROR;
-	}
 	
-	uint32_t subs;
-	if(htsmsg_get_u32(msg, "subscriptionId", &subs) || subs != 1)
-	{
-		htsmsg_destroy(msg);
+	uint32_t subs = msg.getRoot().getU32("subscriptionId");
+	if(subs != 1)
 		return DEMUX_OK;
-	}
 	
 	if(method == "subscriptionStart")
 	{
 		if(!ParseSubscriptionStart(demux, msg))
 		{
-			htsmsg_destroy(msg);
 			return DEMUX_ERROR;
 		}
 	}
@@ -896,7 +860,6 @@ static int DemuxHTSP(demux_t *demux)
 	{
 		if(!ParseSubscriptionStop(demux, msg))
 		{
-			htsmsg_destroy(msg);
 			return DEMUX_ERROR;
 		}
 	}
@@ -904,7 +867,6 @@ static int DemuxHTSP(demux_t *demux)
 	{
 		if(!ParseSubscriptionStatus(demux, msg))
 		{
-			htsmsg_destroy(msg);
 			return DEMUX_ERROR;
 		}
 	}
@@ -912,7 +874,6 @@ static int DemuxHTSP(demux_t *demux)
 	{
 		if(!ParseQueueStatus(demux, msg))
 		{
-			htsmsg_destroy(msg);
 			return DEMUX_ERROR;
 		}
 	}
@@ -920,7 +881,6 @@ static int DemuxHTSP(demux_t *demux)
 	{
 		if(!ParseSignalStatus(demux, msg))
 		{
-			htsmsg_destroy(msg);
 			return DEMUX_ERROR;
 		}
 	}
@@ -928,7 +888,6 @@ static int DemuxHTSP(demux_t *demux)
 	{
 		if(!ParseMuxPacket(demux, msg))
 		{
-			htsmsg_destroy(msg);
 			return DEMUX_ERROR;
 		}
 	}
@@ -936,8 +895,6 @@ static int DemuxHTSP(demux_t *demux)
 	{
 		msg_Dbg(demux, "Ignoring packet of unknown method \"%s\"", method.c_str());
 	}
-	
-	htsmsg_destroy(msg);
 		
 	return DEMUX_OK;
 }
