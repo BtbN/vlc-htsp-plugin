@@ -503,7 +503,7 @@ void HtsInt::Serialize(void *buf)
 	for(uint32_t i = len; i > 0; i--)
 		tmpbuf[i-1] = datap[7 + i - len];
 	
-	printf("Wrote int %ld with name %s and size %d\n", data, getName().c_str(), len);
+	printf("Wrote int %lld with name %s and size %d\n", data, getName().c_str(), len);
 }
 
 uint32_t HtsStr::calcSize()
