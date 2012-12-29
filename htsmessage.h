@@ -19,11 +19,11 @@
 #ifndef H__HTSMESSAGEPP__H__
 #define H__HTSMESSAGEPP__H__
 
+#include <unordered_map>
 #include <cstdint>
 #include <string>
 #include <vector>
 #include <list>
-#include <map>
 
 class HtsMap;
 class HtsList;
@@ -43,13 +43,23 @@ class HtsData
 	virtual std::string getStr() { return std::string(); }
 	virtual void getBin(uint32_t *len, void **buf) { *len = 0; *buf = 0; }
 
+	virtual uint32_t calcSize() { return 0; }
+	virtual void Serialize(void *) {}
+	
 	virtual bool isMap() { return false; }
 	virtual bool isList() { return false; }
 	virtual bool isInt() { return false; }
 	virtual bool isStr() { return false; }
 	virtual bool isBin() { return false; }
+	virtual unsigned char getType() { return 0; }
 
 	virtual bool isValid() { return false; }
+	
+	std::string getName() const { return name; }
+	void setName(const std::string &newName) { name = newName; }
+	
+	private:
+	std::string name;
 };
 
 class HtsMap : public HtsData
@@ -67,14 +77,20 @@ class HtsMap : public HtsData
 	void getBin(const std::string &name, uint32_t *len, void **buf);
 	HtsList getList(const std::string &name);
 
+	std::unordered_map<std::string, HtsData> getRawData() { return data; }
 	HtsData getData(const std::string &name);
 	void setData(const std::string &name, HtsData newData);
 
-	virtual bool isMap() { return true; }
+	uint32_t calcSize();
+	void Serialize(void *buf);
+	
+	bool isMap() { return true; }
 	bool isValid() { return true; }
+	unsigned char getType() { return 1; }
 
 	private:
-	std::map<std::string, HtsData> data;
+	uint32_t pCalcSize();
+	std::unordered_map<std::string, HtsData> data;
 };
 
  class HtsList : public HtsData
@@ -87,10 +103,15 @@ class HtsMap : public HtsData
 	HtsData getData(uint32_t n);
 	void appendData(HtsData newData);
 
-	virtual bool isList() { return true; }
+	uint32_t calcSize();
+	void Serialize(void *buf);
+
+	bool isList() { return true; }
 	bool isValid() { return true; }
+	unsigned char getType() { return 5; }
 
 	private:
+	uint32_t pCalcSize();
 	std::vector<HtsData> data;
 };
 
@@ -107,10 +128,15 @@ class HtsInt : public HtsData
 	uint32_t getU32() { return (uint32_t)data; }
 	int64_t getS64() { return data; }
 
-	virtual bool isInt() { return true; }
+	uint32_t calcSize();
+	void Serialize(void *buf);
+
+	bool isInt() { return true; }
 	bool isValid() { return true; }
+	unsigned char getType() { return 2; }
 
 	private:
+	uint32_t pCalcSize();
 	int64_t data;
 };
 
@@ -123,8 +149,12 @@ class HtsStr : public HtsData
 
 	std::string getStr() { return data; }
 
+	uint32_t calcSize();
+	void Serialize(void *buf);
+
 	virtual bool isStr() { return true; }
 	bool isValid() { return true; }
+	unsigned char getType() { return 3; }
 
 	private:
 	std::string data;
@@ -133,14 +163,20 @@ class HtsStr : public HtsData
 class HtsBin : public HtsData
 {
 	public:
+	HtsBin(const HtsBin &other);
 	HtsBin():data_length(0),data_buf(0) {}
 	HtsBin(uint32_t length, void *buf);
 	~HtsBin();
 
-	void getBin(uint32_t *len, void **buf);
+	void getBin(uint32_t *len, void **buf) const;
+	void setBin(uint32_t len, void *buf);
 
-	virtual bool isBin() { return true; }
+	uint32_t calcSize();
+	void Serialize(void *buf);
+
+	bool isBin() { return true; }
 	bool isValid() { return true; }
+	unsigned char getType() { return 4; }
 
 	private:
 	uint32_t data_length;
@@ -155,7 +191,7 @@ class HtsMessage
 	static HtsMessage Deserialize(uint32_t length, void *buf);
 	bool Serialize(uint32_t *length, void **buf) const;
 
-	HtsMap getRoot() { return root; }
+	HtsMap getRoot() const { return root; }
 	void setRoot(HtsMap newRoot) { root = newRoot; valid = true; }
 	bool isValid() { return valid; }
 

@@ -16,10 +16,99 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
+#define __STDC_CONSTANT_MACROS 1
+
+#include <vlc_common.h>
+#include <vlc_plugin.h>
+#include <vlc_network.h>
+
 #include "htsmessage.h"
 
-HtsMap::HtsMap(uint32_t length, void *buf)
+enum
 {
+	O32_LITTLE_ENDIAN = 0x03020100ul,
+	O32_BIG_ENDIAN = 0x00010203ul,
+	O32_PDP_ENDIAN = 0x01000302ul
+};
+static const union { unsigned char bytes[4]; uint32_t value; } o32_host_order = { { 0, 1, 2, 3 } };
+
+int64_t endian64(int64_t v)
+{
+	if(o32_host_order.value == O32_BIG_ENDIAN)
+		return v;
+
+	int64_t res = 0;
+	
+	char *vp = (char*)&v;
+	char *rp = (char*)&res;
+	
+	rp[0] = vp[7];
+	rp[1] = vp[6];
+	rp[2] = vp[5];
+	rp[3] = vp[4];
+	rp[4] = vp[3];
+	rp[5] = vp[2];
+	rp[6] = vp[1];
+	rp[7] = vp[0];
+	
+	return res;
+}
+
+HtsMap::HtsMap(uint32_t /*length*/, void *buf)
+{
+	char *tmpbuf = (char*)buf;
+	
+	if(tmpbuf[0] != getType())
+		return;
+	tmpbuf += 1;
+	
+	unsigned char nlen = (unsigned char)tmpbuf[0];
+	tmpbuf += 1;
+	
+	int64_t mlen = ntohl(*((uint32_t*)tmpbuf));
+	tmpbuf += sizeof(uint32_t);
+	
+	if(nlen > 0)
+	{
+		setName(std::string(tmpbuf, (size_t)nlen));
+		tmpbuf += nlen;
+	}
+	
+	while(mlen > 0)
+	{
+		unsigned char mtype = (unsigned char)tmpbuf[0];
+		unsigned char subNameLen = (unsigned char)tmpbuf[1];
+		uint32_t subLen = ntohl(*((uint32_t*)(tmpbuf+2)));
+		
+		uint32_t psize = 1+1+4;
+		psize += subNameLen;
+		psize += subLen;
+		
+		HtsData newData;
+		switch(mtype)
+		{
+			case 1:
+				newData = HtsMap(psize, tmpbuf);
+				break;
+			case 2:
+				newData = HtsInt(psize, tmpbuf);
+				break;
+			case 3:
+				newData = HtsStr(psize, tmpbuf);
+				break;
+			case 4:
+				newData = HtsBin(psize, tmpbuf);
+				break;
+			case 5:
+				newData = HtsList(psize, tmpbuf);
+				break;
+		}
+		
+		setData(newData.getName(), newData);
+		
+		tmpbuf += psize;
+		mlen -= psize;
+	}
 }
 
 HtsMessage HtsMap::makeMsg()
@@ -31,81 +120,427 @@ HtsMessage HtsMap::makeMsg()
 
 bool HtsMap::contains(const std::string &name)
 {
+	return data.count(name) > 0;
 }
 
 uint32_t HtsMap::getU32(const std::string &name)
 {
+	return getData(name).getU32();
 }
 
 int64_t HtsMap::getS64(const std::string &name)
 {
+	return getData(name).getS64();
 }
 
 std::string HtsMap::getStr(const std::string &name)
 {
+	return getData(name).getStr();
 }
 
 void HtsMap::getBin(const std::string &name, uint32_t *len, void **buf)
 {
+	getData(name).getBin(len, buf);
 }
 
 HtsList HtsMap::getList(const std::string &name)
 {
+	HtsData dat = getData(name);
+	if(!dat.isList())
+		return HtsList();
+	return static_cast<HtsList&>(dat);
 }
 
 HtsData HtsMap::getData(const std::string &name)
 {
+	if(!contains(name))
+		return HtsData();
+	return data.at(name);
 }
 
 void HtsMap::setData(const std::string &name, HtsData newData)
 {
+	newData.setName(name);
+	data[name] = newData;
 }
 
 
-HtsList::HtsList(uint32_t length, void *buf)
+HtsList::HtsList(uint32_t /*length*/, void *buf)
 {
+	char *tmpbuf = (char*)buf;
+	
+	if(tmpbuf[0] != getType())
+		return;
+	tmpbuf += 1;
+	
+	unsigned char nlen = (unsigned char)tmpbuf[0];
+	tmpbuf += 1;
+	
+	int64_t mlen = ntohl(*((uint32_t*)tmpbuf));
+	tmpbuf += sizeof(uint32_t);
+
+	if(nlen > 0)
+	{
+		setName(std::string(tmpbuf, (size_t)nlen));
+		tmpbuf += nlen;
+	}
+	
+	while(mlen > 0)
+	{
+		unsigned char mtype = (unsigned char)tmpbuf[0];
+		unsigned char subNameLen = (unsigned char)tmpbuf[1];
+		uint32_t subLen = ntohl(*((uint32_t*)(tmpbuf+2)));
+		
+		uint32_t psize = 1+1+4;
+		psize += subNameLen;
+		psize += subLen;
+		
+		HtsData newData;
+		switch(mtype)
+		{
+			case 1:
+				newData = HtsMap(psize, tmpbuf);
+				break;
+			case 2:
+				newData = HtsInt(psize, tmpbuf);
+				break;
+			case 3:
+				newData = HtsStr(psize, tmpbuf);
+				break;
+			case 4:
+				newData = HtsBin(psize, tmpbuf);
+				break;
+			case 5:
+				newData = HtsList(psize, tmpbuf);
+				break;
+		}
+
+		appendData(newData);
+		
+		tmpbuf += psize;
+		mlen -= psize;
+	}
 }
 
 uint32_t HtsList::count()
 {
+	return data.size();
 }
 
 HtsData HtsList::getData(uint32_t n)
 {
+	if(n >= data.size())
+		return HtsData();
+	return data.at(n);
 }
 
 void HtsList::appendData(HtsData newData)
 {
+	newData.setName("");
+	data.push_back(newData);
 }
 
 
-HtsInt::HtsInt(uint32_t length, void *buf)
+HtsInt::HtsInt(uint32_t /*length*/, void *buf)
 {
+	data = 0;
+	char *tmpbuf = (char*)buf;
+	
+	if(tmpbuf[0] != getType())
+		return;
+	
+	unsigned char nlen = (unsigned char)tmpbuf[1];
+	uint32_t len = ntohl(*((uint32_t*)(tmpbuf+2)));
+	if(len > 8)
+		len = 8;
+	
+	tmpbuf += 6;
+	
+	if(nlen > 0)
+	{
+		setName(std::string(tmpbuf, (size_t)nlen));
+		tmpbuf += nlen;
+	}
+	
+	char *datap = (char*)&data;
+	
+	for(uint32_t i = len; i > 0; i--)
+		datap[7 + i - len] = tmpbuf[i-1];
+	
+	data = endian64(data);
 }
 
 
-HtsStr::HtsStr(uint32_t length, void *buf)
+HtsStr::HtsStr(uint32_t /*length*/, void *buf)
 {
+	char *tmpbuf = (char*)buf;
+
+	if(tmpbuf[0] != getType())
+		return;
+	
+	unsigned char nlen = (unsigned char)tmpbuf[1];
+	uint32_t len = ntohl(*((uint32_t*)(tmpbuf+2)));
+	
+	tmpbuf += 6;
+	
+	if(nlen > 0)
+	{
+		setName(std::string(tmpbuf, (size_t)nlen));
+		tmpbuf += nlen;
+	}
+	
+	data = std::string(tmpbuf, (size_t)len);
 }
 
 
-HtsBin::HtsBin(uint32_t length, void *buf)
+HtsBin::HtsBin(const HtsBin &other)
 {
+	other.getBin(&data_length, &data_buf);
 }
 
-void HtsBin::getBin(uint32_t *len, void **buf)
+HtsBin::HtsBin(uint32_t /*length*/, void *buf)
 {
+	char *tmpbuf = (char*)buf;
+
+	if(tmpbuf[0] != getType())
+		return;
+	
+	unsigned char nlen = (unsigned char)tmpbuf[1];
+	data_length = ntohl(*((uint32_t*)(tmpbuf+2)));
+
+	tmpbuf += 6;
+	
+	if(nlen > 0)
+	{
+		setName(std::string(tmpbuf, (size_t)nlen));
+		tmpbuf += nlen;
+	}
+	
+	data_buf = malloc(data_length);
+	memcpy(data_buf, tmpbuf, data_length);
+}
+
+void HtsBin::getBin(uint32_t *len, void **buf) const
+{
+	*len = data_length;
+	void *mem = malloc(data_length);
+	memcpy(mem, data_buf, data_length);
+	*buf = mem;
+}
+
+void HtsBin::setBin(uint32_t len, void *buf)
+{
+	if(data_buf)
+		free(data_buf);
+
+	data_length = len;
+	data_buf = malloc(len);
+	memcpy(data_buf, buf, len);
 }
 
 HtsBin::~HtsBin()
 {
+	if(data_buf)
+		free(data_buf);
 }
 
 
 HtsMessage HtsMessage::Deserialize(uint32_t length, void *buf)
 {
+	char *tmpbuf = (char*)buf;
+	if(tmpbuf[0] != 1) // Root element is not a map, something is wrong here.
+		return HtsMessage();
+	return HtsMap(length, buf).makeMsg();
 }
 
 bool HtsMessage::Serialize(uint32_t *length, void **buf) const
 {
+	char *resBuf = 0;
+	uint32_t resLength = 0;
+	*length = 0;
+	*buf = 0;
+
+	HtsMap map = getRoot();
+	resLength = map.calcSize();
+	resBuf = (char*)malloc(resLength + 4);
+	
+	*((uint32_t*)resBuf) = htonl(resLength);
+	map.Serialize(resBuf + 4);
+
+	*length = resLength;
+	*buf = resBuf;
+	return true;
+}
+
+uint32_t HtsMap::calcSize()
+{
+	return pCalcSize() + 6 + getName().length();
+}
+
+uint32_t HtsMap::pCalcSize()
+{
+	uint32_t totalSize = 0;
+	for(auto it = data.begin(); it != data.end(); ++it)
+		totalSize += it->second.calcSize();
+	return totalSize;
+}
+
+void HtsMap::Serialize(void *buf)
+{
+	unsigned char *tmpbuf = (unsigned char*)buf;
+
+	tmpbuf[0] = getType();
+	tmpbuf[1] = getName().length();
+	
+	*((uint32_t*)(tmpbuf + 2)) = pCalcSize();
+	tmpbuf += 6;
+	
+	if(getName().length() > 0)
+	{
+		memcpy(tmpbuf, getName().c_str(), getName().length());
+		tmpbuf += getName().length();
+	}
+	
+	for(auto it = data.begin(); it != data.end(); ++it)
+	{
+		it->second.Serialize(tmpbuf);
+		tmpbuf += it->second.calcSize();
+	}
+}
+
+uint32_t HtsList::pCalcSize()
+{
+	uint32_t totalSize = 0;
+	for(uint32_t i = 0; i < data.size(); i++)
+		totalSize += data.at(i).calcSize();
+	return totalSize;
+}
+
+uint32_t HtsList::calcSize()
+{
+	return pCalcSize() + 6 + getName().length();
+}
+
+void HtsList::Serialize(void *buf)
+{
+	unsigned char *tmpbuf = (unsigned char*)buf;
+
+	tmpbuf[0] = getType();
+	tmpbuf[1] = getName().length();
+	
+	*((uint32_t*)(tmpbuf + 2)) = pCalcSize();
+	tmpbuf += 6;
+	
+	if(getName().length() > 0)
+	{
+		memcpy(tmpbuf, getName().c_str(), getName().length());
+		tmpbuf += getName().length();
+	}
+	
+	for(uint32_t i = 0; i < data.size(); i++)
+	{
+		HtsData d = data.at(i);
+		d.Serialize(tmpbuf);
+		tmpbuf += d.calcSize();
+	}
+}
+
+uint32_t HtsInt::calcSize()
+{
+	return pCalcSize() + getName().length() + 6;
+}
+
+uint32_t HtsInt::pCalcSize()
+{
+	if(data < 0)
+		return 8;
+	if(data <= 0xFF)
+		return 1;
+	if(data <= 0xFFFF)
+		return 2;
+	if(data <= 0xFFFFFF)
+		return 3;
+	if(data <= 0xFFFFFFFF)
+		return 4;
+	if(data <= 0xFFFFFFFFFF)
+		return 5;
+	if(data <= 0xFFFFFFFFFFFF)
+		return 6;
+	if(data <= 0xFFFFFFFFFFFFFF)
+		return 7;
+	return 8;
+}
+
+void HtsInt::Serialize(void *buf)
+{
+	uint32_t len = pCalcSize();
+	char *tmpbuf = (char*)buf;
+	
+	tmpbuf[0] = getType();
+	tmpbuf[1] = getName().length();
+	
+	*((uint32_t*)(tmpbuf + 2)) = pCalcSize();
+	tmpbuf += 6;
+	
+	if(getName().length() > 0)
+	{
+		memcpy(tmpbuf, getName().c_str(), getName().length());
+		tmpbuf += getName().length();
+	}
+	
+	int64_t tmp = endian64(data);
+	char *datap = (char*)&tmp;
+	
+	for(uint32_t i = len; i > 0; i--)
+		tmpbuf[i-1] = datap[7 + i - len];
+	
+	data = endian64(data);
+}
+
+uint32_t HtsStr::calcSize()
+{
+	return data.length() + getName().length() + 6;
+}
+
+void HtsStr::Serialize(void *buf)
+{
+	unsigned char *tmpbuf = (unsigned char*)buf;
+
+	tmpbuf[0] = getType();
+	tmpbuf[1] = getName().length();
+	
+	*((uint32_t*)(tmpbuf + 2)) = data.length();
+	tmpbuf += 6;
+	
+	if(getName().length() > 0)
+	{
+		memcpy(tmpbuf, getName().c_str(), getName().length());
+		tmpbuf += getName().length();
+	}
+	
+	memcpy(buf, data.c_str(), data.length());
+}
+
+uint32_t HtsBin::calcSize()
+{
+	return data_length + getName().length() + 6;
+}
+
+void HtsBin::Serialize(void *buf)
+{
+	unsigned char *tmpbuf = (unsigned char*)buf;
+
+	tmpbuf[0] = getType();
+	tmpbuf[1] = getName().length();
+	
+	*((uint32_t*)(tmpbuf + 2)) = data_length;
+	tmpbuf += 6;
+	
+	if(getName().length() > 0)
+	{
+		memcpy(tmpbuf, getName().c_str(), getName().length());
+		tmpbuf += getName().length();
+	}
+	
+	memcpy(tmpbuf, data_buf, data_length);
 }
