@@ -300,7 +300,7 @@ bool ConnectHTSP(demux_t *demux)
 	if(!m.isValid())
 		return false;
 
-	size_t chall_len;
+	uint32_t chall_len;
 	void * chall;
 
 	sys->serverName = m.getRoot().getStr("servername");
