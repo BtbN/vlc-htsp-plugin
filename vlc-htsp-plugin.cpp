@@ -834,7 +834,7 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	{
 		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr);
 		sys->lastPcr = pcr;
-		msg_Dbg(demux, "Sent PCR %ld from stream %d, biggest current pcr is %ld from stream %d, diff %ld with a delay of %ld", pcr, nbstream, bpcr, bstream, bpcr - pcr, sys->ptsDelay);
+		//msg_Dbg(demux, "Sent PCR %ld from stream %d, biggest current pcr is %ld from stream %d, diff %ld with a delay of %ld", pcr, nbstream, bpcr, bstream, bpcr - pcr, sys->ptsDelay);
 	}
 
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
