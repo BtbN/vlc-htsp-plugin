@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <memory>
 #include <list>
 
 class HtsMap;
@@ -41,7 +42,7 @@ class HtsData
 	virtual uint32_t getU32() { return 0; }
 	virtual int64_t getS64() { return 0; }
 	virtual std::string getStr() { return std::string(); }
-	virtual void getBin(uint32_t *len, void **buf) { *len = 0; *buf = 0; }
+	virtual void getBin(uint32_t *len, void **buf) const { *len = 0; *buf = 0; }
 
 	virtual uint32_t calcSize() { return 0; }
 	virtual void Serialize(void *) {}
@@ -77,20 +78,20 @@ class HtsMap : public HtsData
 	void getBin(const std::string &name, uint32_t *len, void **buf);
 	HtsList getList(const std::string &name);
 
-	std::unordered_map<std::string, HtsData> getRawData() { return data; }
-	HtsData getData(const std::string &name);
-	void setData(const std::string &name, HtsData newData);
+	std::unordered_map<std::string, std::shared_ptr<HtsData>> getRawData() { return data; }
+	std::shared_ptr<HtsData> getData(const std::string &name);
+	void setData(const std::string &name, std::shared_ptr<HtsData> newData);
 
-	uint32_t calcSize();
-	void Serialize(void *buf);
+	virtual uint32_t calcSize();
+	virtual void Serialize(void *buf);
 	
-	bool isMap() { return true; }
-	bool isValid() { return true; }
-	unsigned char getType() { return 1; }
+	virtual bool isMap() { return true; }
+	virtual bool isValid() { return true; }
+	virtual unsigned char getType() { return 1; }
 
 	private:
 	uint32_t pCalcSize();
-	std::unordered_map<std::string, HtsData> data;
+	std::unordered_map<std::string, std::shared_ptr<HtsData>> data;
 };
 
  class HtsList : public HtsData
@@ -100,19 +101,19 @@ class HtsMap : public HtsData
 	HtsList(uint32_t length, void *buf);
 
 	uint32_t count();
-	HtsData getData(uint32_t n);
-	void appendData(HtsData newData);
+	std::shared_ptr<HtsData> getData(uint32_t n);
+	void appendData(std::shared_ptr<HtsData> newData);
 
-	uint32_t calcSize();
-	void Serialize(void *buf);
+	virtual uint32_t calcSize();
+	virtual void Serialize(void *buf);
 
-	bool isList() { return true; }
-	bool isValid() { return true; }
-	unsigned char getType() { return 5; }
+	virtual bool isList() { return true; }
+	virtual bool isValid() { return true; }
+	virtual unsigned char getType() { return 5; }
 
 	private:
 	uint32_t pCalcSize();
-	std::vector<HtsData> data;
+	std::vector<std::shared_ptr<HtsData>> data;
 };
 
 class HtsInt : public HtsData
@@ -125,15 +126,15 @@ class HtsInt : public HtsData
 	HtsInt(uint64_t data) { data = (int64_t)data; }
 	HtsInt(int64_t data):data(data) {}
 
-	uint32_t getU32() { return (uint32_t)data; }
-	int64_t getS64() { return data; }
+	virtual uint32_t getU32() { return (uint32_t)data; }
+	virtual int64_t getS64() { return data; }
 
-	uint32_t calcSize();
-	void Serialize(void *buf);
+	virtual uint32_t calcSize();
+	virtual void Serialize(void *buf);
 
-	bool isInt() { return true; }
-	bool isValid() { return true; }
-	unsigned char getType() { return 2; }
+	virtual bool isInt() { return true; }
+	virtual bool isValid() { return true; }
+	virtual unsigned char getType() { return 2; }
 
 	private:
 	uint32_t pCalcSize();
@@ -147,14 +148,14 @@ class HtsStr : public HtsData
 	HtsStr(uint32_t length, void *buf);
 	HtsStr(const std::string &str):data(str) {}
 
-	std::string getStr() { return data; }
+	virtual std::string getStr() { return data; }
 
-	uint32_t calcSize();
-	void Serialize(void *buf);
+	virtual uint32_t calcSize();
+	virtual void Serialize(void *buf);
 
 	virtual bool isStr() { return true; }
-	bool isValid() { return true; }
-	unsigned char getType() { return 3; }
+	virtual bool isValid() { return true; }
+	virtual unsigned char getType() { return 3; }
 
 	private:
 	std::string data;
@@ -168,15 +169,15 @@ class HtsBin : public HtsData
 	HtsBin(uint32_t length, void *buf);
 	~HtsBin();
 
-	void getBin(uint32_t *len, void **buf) const;
-	void setBin(uint32_t len, void *buf);
+	virtual void getBin(uint32_t *len, void **buf) const;
+	virtual void setBin(uint32_t len, void *buf);
 
-	uint32_t calcSize();
-	void Serialize(void *buf);
+	virtual uint32_t calcSize();
+	virtual void Serialize(void *buf);
 
-	bool isBin() { return true; }
-	bool isValid() { return true; }
-	unsigned char getType() { return 4; }
+	virtual bool isBin() { return true; }
+	virtual bool isValid() { return true; }
+	virtual unsigned char getType() { return 4; }
 
 	private:
 	uint32_t data_length;
@@ -189,9 +190,9 @@ class HtsMessage
 	HtsMessage():valid(false) {}
 
 	static HtsMessage Deserialize(uint32_t length, void *buf);
-	bool Serialize(uint32_t *length, void **buf) const;
+	bool Serialize(uint32_t *length, void **buf);
 
-	HtsMap getRoot() const { return root; }
+	HtsMap &getRoot() { return root; }
 	void setRoot(HtsMap newRoot) { root = newRoot; valid = true; }
 	bool isValid() { return valid; }
 

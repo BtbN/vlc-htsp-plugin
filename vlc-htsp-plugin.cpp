@@ -32,6 +32,7 @@
 #include <list>
 #include <deque>
 #include <string>
+#include <memory>
 #include <sstream>
 
 #include "htsmessage.h"
@@ -177,11 +178,13 @@ HtsMessage ReadMessage(demux_t *demux)
 		return res;
 	}
 
+	printf("start read\n");
 	if(net_Read(demux, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
 	{
 		msg_Err(demux, "Error reading from socket: %s", strerror(errno));
 		return HtsMessage();
 	}
+	printf("done read: %d\n", len);
 
 	len = ntohl(len);
 
@@ -213,7 +216,10 @@ HtsMessage ReadMessage(demux_t *demux)
 		return HtsMessage();
 	}
 
-	return HtsMessage::Deserialize(len, buf);
+	printf("Start deserialize\n");
+	HtsMessage res = HtsMessage::Deserialize(len, buf);
+	printf("Start done deserialize\n");
+	return res;
 }
 
 HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
@@ -224,22 +230,28 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 	if(sequence)
 	{
 		iSequence = HTSPNextSeqNum(sys);
-		m.getRoot().setData("seq", HtsInt(iSequence));
+		m.getRoot().setData("seq", std::make_shared<HtsInt>(iSequence));
 	}
 
+	printf("in\n");
 	if(!TransmitMessage(demux, m))
 		return HtsMessage();
+	printf("out\n");
 
 	std::deque<HtsMessage> queue;
 	sys->queue.swap(queue);
 
 	while((m = ReadMessage(demux)).isValid())
 	{
+		printf("Did not hit 1!\n");
 		if(!sequence)
 			break;
+		printf("Did not hit 2!\n");
 		if(m.getRoot().contains("seq") && m.getRoot().getU32("seq") == iSequence)
 			break;
 
+		printf("Did not hit 3!\n");
+			
 		queue.push_back(m);
 		if(queue.size() >= MAX_QUEUE_SIZE)
 		{
@@ -248,6 +260,8 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 			return HtsMessage();
 		}
 	}
+	
+	printf("out loop\n");
 
 	sys->queue.swap(queue);
 
@@ -292,13 +306,18 @@ bool ConnectHTSP(demux_t *demux)
 		return false;
 
 	HtsMap map;
-	map.setData("method", HtsStr("hello"));
-	map.setData("clientname", HtsStr("VLC media player"));
-	map.setData("htspversion", HtsInt(7));
+	map.setData("method", std::make_shared<HtsStr>("hello"));
+	map.setData("clientname", std::make_shared<HtsStr>("VLC media player"));
+	map.setData("htspversion", std::make_shared<HtsInt>(7));
 
+	printf("1\n");
 	HtsMessage m = ReadResult(demux, map.makeMsg());
 	if(!m.isValid())
+	{
+		printf("no :(\n");
 		return false;
+	}
+	printf("2\n");
 
 	uint32_t chall_len;
 	void * chall;
@@ -314,8 +333,8 @@ bool ConnectHTSP(demux_t *demux)
 		return true;
 
 	map = HtsMap();
-	map.setData("method", HtsStr("authenticate"));
-	map.setData("username", HtsStr(sys->username));
+	map.setData("method", std::make_shared<HtsStr>("authenticate"));
+	map.setData("username", std::make_shared<HtsStr>(sys->username));
 
 	if(sys->password != "" && chall)
 	{
@@ -365,7 +384,7 @@ void PopulatePlaylist(demux_t *demux)
 	playlist_t *pl = pl_Get(demux);
 
 	HtsMap map;
-	map.setData("method", HtsStr("enableAsyncMetadata"));
+	map.setData("method", std::make_shared<HtsStr>("enableAsyncMetadata"));
 	if(!ReadSuccess(demux, map.makeMsg(), "enable async metadata"))
 		return;
 
@@ -428,12 +447,12 @@ bool SubscribeHTSP(demux_t *demux)
 	demux_sys_t *sys = demux->p_sys;
 
 	HtsMap map;
-	map.setData("method", HtsStr("subscribe"));
-	map.setData("channelId", HtsInt(sys->channelId));
-	map.setData("subscriptionId", HtsInt(1));
-	map.setData("timeshiftPeriod", HtsInt((uint32_t)~0));
-	//map.setData("90khz", HtsInt(1));
-	//map.setData("normts", HtsInt(1));
+	map.setData("method", std::make_shared<HtsStr>("subscribe"));
+	map.setData("channelId", std::make_shared<HtsInt>(sys->channelId));
+	map.setData("subscriptionId", std::make_shared<HtsInt>(1));
+	map.setData("timeshiftPeriod", std::make_shared<HtsInt>((uint32_t)~0));
+	//map.setData("90khz", std::make_shared<HtsInt>(1));
+	//map.setData("normts", std::make_shared<HtsInt>(1));
 
 	bool res = ReadSuccess(demux, map.makeMsg(), "subscribe to channel");
 	if(res)
@@ -587,18 +606,18 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
 	for(uint32_t jj = 0; jj < streams.count(); jj++)
 	{
-		HtsData sub = streams.getData(jj);
-		if(!sub.isMap())
+		std::shared_ptr<HtsData> sub = streams.getData(jj);
+		if(!sub->isMap())
 			continue;
-		HtsMap &map = static_cast<HtsMap&>(sub);
+		std::shared_ptr<HtsMap> map = std::static_pointer_cast<HtsMap>(sub);
 
-		std::string type = map.getStr("type");
+		std::string type = map->getStr("type");
 		if(type.empty())
 			continue;
 
-		if(!map.contains("index"))
+		if(!map->contains("index"))
 			continue;
-		uint32_t index = map.getU32("index");
+		uint32_t index = map->getU32("index");
 		int i = index - 1;
 
 		es_format_t *fmt = &(sys->stream[i].fmt);
@@ -654,16 +673,16 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 			if(sys->pcrStream == 0)
 				sys->pcrStream = index;
 
-			fmt->video.i_width = map.getU32("width");
-			fmt->video.i_height = map.getU32("height");
+			fmt->video.i_width = map->getU32("width");
+			fmt->video.i_height = map->getU32("height");
 		}
 		else if(fmt->i_cat == AUDIO_ES)
 		{
-			fmt->audio.i_physical_channels = map.getU32("channels");
-			fmt->audio.i_rate = map.getU32("rate");
+			fmt->audio.i_physical_channels = map->getU32("channels");
+			fmt->audio.i_rate = map->getU32("rate");
 		}
 
-		std::string lang = map.getStr("language");
+		std::string lang = map->getStr("language");
 		if(!lang.empty())
 		{
 			fmt->psz_language = (char*)malloc(lang.length()+1);

@@ -84,27 +84,28 @@ HtsMap::HtsMap(uint32_t /*length*/, void *buf)
 		psize += subNameLen;
 		psize += subLen;
 		
-		HtsData newData;
+		std::shared_ptr<HtsData> newData;
 		switch(mtype)
 		{
 			case 1:
-				newData = HtsMap(psize, tmpbuf);
+				newData = std::make_shared<HtsMap>(psize, tmpbuf);
 				break;
 			case 2:
-				newData = HtsInt(psize, tmpbuf);
+				newData = std::make_shared<HtsInt>(psize, tmpbuf);
 				break;
 			case 3:
-				newData = HtsStr(psize, tmpbuf);
+				newData = std::make_shared<HtsStr>(psize, tmpbuf);
 				break;
 			case 4:
-				newData = HtsBin(psize, tmpbuf);
+				newData = std::make_shared<HtsBin>(psize, tmpbuf);
 				break;
 			case 5:
-				newData = HtsList(psize, tmpbuf);
+				newData = std::make_shared<HtsList>(psize, tmpbuf);
 				break;
 		}
 		
-		setData(newData.getName(), newData);
+		setData(newData->getName(), newData);
+		printf("Read new Data of type %d: %s", mtype, newData->getName().c_str());
 		
 		tmpbuf += psize;
 		mlen -= psize;
@@ -125,42 +126,42 @@ bool HtsMap::contains(const std::string &name)
 
 uint32_t HtsMap::getU32(const std::string &name)
 {
-	return getData(name).getU32();
+	return getData(name)->getU32();
 }
 
 int64_t HtsMap::getS64(const std::string &name)
 {
-	return getData(name).getS64();
+	return getData(name)->getS64();
 }
 
 std::string HtsMap::getStr(const std::string &name)
 {
-	return getData(name).getStr();
+	return getData(name)->getStr();
 }
 
 void HtsMap::getBin(const std::string &name, uint32_t *len, void **buf)
 {
-	getData(name).getBin(len, buf);
+	getData(name)->getBin(len, buf);
 }
 
 HtsList HtsMap::getList(const std::string &name)
 {
-	HtsData dat = getData(name);
-	if(!dat.isList())
+	std::shared_ptr<HtsData> dat = getData(name);
+	if(!dat->isList())
 		return HtsList();
-	return static_cast<HtsList&>(dat);
+	return *std::static_pointer_cast<HtsList>(dat);
 }
 
-HtsData HtsMap::getData(const std::string &name)
+std::shared_ptr<HtsData> HtsMap::getData(const std::string &name)
 {
 	if(!contains(name))
-		return HtsData();
+		return std::make_shared<HtsData>();
 	return data.at(name);
 }
 
-void HtsMap::setData(const std::string &name, HtsData newData)
+void HtsMap::setData(const std::string &name, std::shared_ptr<HtsData> newData)
 {
-	newData.setName(name);
+	newData->setName(name);
 	data[name] = newData;
 }
 
@@ -195,23 +196,23 @@ HtsList::HtsList(uint32_t /*length*/, void *buf)
 		psize += subNameLen;
 		psize += subLen;
 		
-		HtsData newData;
+		std::shared_ptr<HtsData> newData;
 		switch(mtype)
 		{
 			case 1:
-				newData = HtsMap(psize, tmpbuf);
+				newData = std::make_shared<HtsMap>(psize, tmpbuf);
 				break;
 			case 2:
-				newData = HtsInt(psize, tmpbuf);
+				newData = std::make_shared<HtsInt>(psize, tmpbuf);
 				break;
 			case 3:
-				newData = HtsStr(psize, tmpbuf);
+				newData = std::make_shared<HtsStr>(psize, tmpbuf);
 				break;
 			case 4:
-				newData = HtsBin(psize, tmpbuf);
+				newData = std::make_shared<HtsBin>(psize, tmpbuf);
 				break;
 			case 5:
-				newData = HtsList(psize, tmpbuf);
+				newData = std::make_shared<HtsList>(psize, tmpbuf);
 				break;
 		}
 
@@ -227,16 +228,16 @@ uint32_t HtsList::count()
 	return data.size();
 }
 
-HtsData HtsList::getData(uint32_t n)
+std::shared_ptr<HtsData> HtsList::getData(uint32_t n)
 {
 	if(n >= data.size())
-		return HtsData();
+		return std::make_shared<HtsData>();
 	return data.at(n);
 }
 
-void HtsList::appendData(HtsData newData)
+void HtsList::appendData(std::shared_ptr<HtsData> newData)
 {
-	newData.setName("");
+	newData->setName("");
 	data.push_back(newData);
 }
 
@@ -350,10 +351,10 @@ HtsMessage HtsMessage::Deserialize(uint32_t length, void *buf)
 	char *tmpbuf = (char*)buf;
 	if(tmpbuf[0] != 1) // Root element is not a map, something is wrong here.
 		return HtsMessage();
-	return HtsMap(length, buf).makeMsg();
+	return HtsMap(length, tmpbuf).makeMsg();
 }
 
-bool HtsMessage::Serialize(uint32_t *length, void **buf) const
+bool HtsMessage::Serialize(uint32_t *length, void **buf)
 {
 	char *resBuf = 0;
 	uint32_t resLength = 0;
@@ -381,7 +382,9 @@ uint32_t HtsMap::pCalcSize()
 {
 	uint32_t totalSize = 0;
 	for(auto it = data.begin(); it != data.end(); ++it)
-		totalSize += it->second.calcSize();
+	{
+		totalSize += it->second->calcSize();
+	}
 	return totalSize;
 }
 
@@ -392,7 +395,7 @@ void HtsMap::Serialize(void *buf)
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
 	
-	*((uint32_t*)(tmpbuf + 2)) = pCalcSize();
+	*((uint32_t*)(tmpbuf + 2)) = htonl(pCalcSize());
 	tmpbuf += 6;
 	
 	if(getName().length() > 0)
@@ -401,10 +404,14 @@ void HtsMap::Serialize(void *buf)
 		tmpbuf += getName().length();
 	}
 	
+	printf("Serializing map!\n");
+	
 	for(auto it = data.begin(); it != data.end(); ++it)
 	{
-		it->second.Serialize(tmpbuf);
-		tmpbuf += it->second.calcSize();
+		std::shared_ptr<HtsData> dat = it->second;
+		printf("Serializing %s with type %d!\n", dat->getName().c_str(), dat->getType());
+		dat->Serialize(tmpbuf);
+		tmpbuf += dat->calcSize();
 	}
 }
 
@@ -412,7 +419,9 @@ uint32_t HtsList::pCalcSize()
 {
 	uint32_t totalSize = 0;
 	for(uint32_t i = 0; i < data.size(); i++)
-		totalSize += data.at(i).calcSize();
+	{
+		totalSize += data.at(i)->calcSize();
+	}
 	return totalSize;
 }
 
@@ -428,7 +437,7 @@ void HtsList::Serialize(void *buf)
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
 	
-	*((uint32_t*)(tmpbuf + 2)) = pCalcSize();
+	*((uint32_t*)(tmpbuf + 2)) = htonl(pCalcSize());
 	tmpbuf += 6;
 	
 	if(getName().length() > 0)
@@ -439,9 +448,9 @@ void HtsList::Serialize(void *buf)
 	
 	for(uint32_t i = 0; i < data.size(); i++)
 	{
-		HtsData d = data.at(i);
-		d.Serialize(tmpbuf);
-		tmpbuf += d.calcSize();
+		std::shared_ptr<HtsData> d = data.at(i);
+		d->Serialize(tmpbuf);
+		tmpbuf += d->calcSize();
 	}
 }
 
@@ -479,7 +488,7 @@ void HtsInt::Serialize(void *buf)
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
 	
-	*((uint32_t*)(tmpbuf + 2)) = pCalcSize();
+	*((uint32_t*)(tmpbuf + 2)) = htonl(pCalcSize());
 	tmpbuf += 6;
 	
 	if(getName().length() > 0)
@@ -494,7 +503,7 @@ void HtsInt::Serialize(void *buf)
 	for(uint32_t i = len; i > 0; i--)
 		tmpbuf[i-1] = datap[7 + i - len];
 	
-	data = endian64(data);
+	printf("Wrote int %ld with name %s and size %d\n", data, getName().c_str(), len);
 }
 
 uint32_t HtsStr::calcSize()
@@ -509,7 +518,7 @@ void HtsStr::Serialize(void *buf)
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
 	
-	*((uint32_t*)(tmpbuf + 2)) = data.length();
+	*((uint32_t*)(tmpbuf + 2)) = htonl(data.length());
 	tmpbuf += 6;
 	
 	if(getName().length() > 0)
@@ -533,7 +542,7 @@ void HtsBin::Serialize(void *buf)
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
 	
-	*((uint32_t*)(tmpbuf + 2)) = data_length;
+	*((uint32_t*)(tmpbuf + 2)) = htonl(data_length);
 	tmpbuf += 6;
 	
 	if(getName().length() > 0)
