@@ -36,6 +36,7 @@
 #include <sstream>
 
 #include "htsmessage.h"
+#include "sha1.h"
 
 static int OpenHTSP(vlc_object_t *);
 static void CloseHTSP(vlc_object_t *);
@@ -322,15 +323,18 @@ bool ConnectHTSP(demux_t *demux)
 	{
 		msg_Info(demux, "Authenticating as '%s' with a password", sys->username.c_str());
 
-		// !!!TODO!!!
-		/* HTSSHA1 *shactx = (HTSSHA1*)malloc(hts_sha1_size);
+		HTSSHA1 *shactx = (HTSSHA1*)malloc(hts_sha1_size);
 		uint8_t d[20];
 		hts_sha1_init(shactx);
 		hts_sha1_update(shactx, (const uint8_t *)(sys->password.c_str()), sys->password.length());
 		hts_sha1_update(shactx, (const uint8_t *)chall, chall_len);
 		hts_sha1_final(shactx, d);
-		htsmsg_add_bin(m, "digest", d, 20);
-		free(shactx); */
+		
+		std::shared_ptr<HtsBin> bin = std::make_shared<HtsBin>();
+		bin->setBin(20, d);
+		map.setData("digest", bin);
+		
+		free(shactx);
 	}
 	else
 		msg_Info(demux, "Authenticating as '%s' without a password", sys->username.c_str());
