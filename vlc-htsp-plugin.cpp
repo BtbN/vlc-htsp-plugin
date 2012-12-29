@@ -178,13 +178,11 @@ HtsMessage ReadMessage(demux_t *demux)
 		return res;
 	}
 
-	printf("start read\n");
 	if(net_Read(demux, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
 	{
 		msg_Err(demux, "Error reading from socket: %s", strerror(errno));
 		return HtsMessage();
 	}
-	printf("done read: %d\n", len);
 
 	len = ntohl(len);
 
@@ -216,10 +214,7 @@ HtsMessage ReadMessage(demux_t *demux)
 		return HtsMessage();
 	}
 
-	printf("Start deserialize\n");
-	HtsMessage res = HtsMessage::Deserialize(len, buf);
-	printf("Start done deserialize\n");
-	return res;
+	return HtsMessage::Deserialize(len, buf);
 }
 
 HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
@@ -233,24 +228,18 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 		m.getRoot().setData("seq", std::make_shared<HtsInt>(iSequence));
 	}
 
-	printf("in\n");
 	if(!TransmitMessage(demux, m))
 		return HtsMessage();
-	printf("out\n");
 
 	std::deque<HtsMessage> queue;
 	sys->queue.swap(queue);
 
 	while((m = ReadMessage(demux)).isValid())
 	{
-		printf("Did not hit 1!\n");
 		if(!sequence)
 			break;
-		printf("Did not hit 2!\n");
 		if(m.getRoot().contains("seq") && m.getRoot().getU32("seq") == iSequence)
 			break;
-
-		printf("Did not hit 3!\n");
 			
 		queue.push_back(m);
 		if(queue.size() >= MAX_QUEUE_SIZE)
@@ -260,8 +249,6 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 			return HtsMessage();
 		}
 	}
-	
-	printf("out loop\n");
 
 	sys->queue.swap(queue);
 
@@ -310,14 +297,9 @@ bool ConnectHTSP(demux_t *demux)
 	map.setData("clientname", std::make_shared<HtsStr>("VLC media player"));
 	map.setData("htspversion", std::make_shared<HtsInt>(7));
 
-	printf("1\n");
 	HtsMessage m = ReadResult(demux, map.makeMsg());
 	if(!m.isValid())
-	{
-		printf("no :(\n");
 		return false;
-	}
-	printf("2\n");
 
 	uint32_t chall_len;
 	void * chall;

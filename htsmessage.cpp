@@ -105,7 +105,6 @@ HtsMap::HtsMap(uint32_t /*length*/, void *buf)
 		}
 		
 		setData(newData->getName(), newData);
-		printf("Read new Data of type %d: %s", mtype, newData->getName().c_str());
 		
 		tmpbuf += psize;
 		mlen -= psize;
@@ -415,7 +414,7 @@ bool HtsMessage::Serialize(uint32_t *length, void **buf)
 		tmpbuf += it->second->calcSize();
 	}
 	
-	printf("Calculated total size %d\n", resLength + 4);
+	/*printf("Calculated total size %d\n", resLength + 4);
 	for(uint32_t i = 0; i < resLength; i++)
 	{
 		char an = resBuf[i];
@@ -426,7 +425,7 @@ bool HtsMessage::Serialize(uint32_t *length, void **buf)
 		
 		printf("0x%X(%c) ", resBuf[i], an);
 	}
-	printf("\n");
+	printf("\n");*/
 
 	*length = resLength+4;
 	*buf = resBuf;
