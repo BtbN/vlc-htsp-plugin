@@ -73,7 +73,7 @@ struct demux_sys_t
 		:start(0)
 		,pcrStream(0)
 		,lastPcr(0)
-		,ptsDelay(1500000)
+		,ptsDelay(300000)
 		,netfd(0)
 		,streamCount(0)
 		,stream(0)
@@ -554,6 +554,7 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
 			*va_arg(args, int64_t*) = sys->lastPcr;
+			return VLC_SUCCESS;
 		default:
 			return VLC_EGENERIC;
 	}
@@ -831,7 +832,7 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 
 	if(pcr > sys->lastPcr + sys->ptsDelay && pcr > 0)
 	{
-		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr - sys->ptsDelay);
+		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr);
 		sys->lastPcr = pcr;
 		msg_Dbg(demux, "Sent PCR %ld from stream %d, biggest current pcr is %ld from stream %d, diff %ld with a delay of %ld", pcr, nbstream, bpcr, bstream, bpcr - pcr, sys->ptsDelay);
 	}
