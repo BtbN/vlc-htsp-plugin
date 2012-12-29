@@ -44,8 +44,8 @@ class HtsData
 	virtual std::string getStr() { return std::string(); }
 	virtual void getBin(uint32_t *len, void **buf) const { *len = 0; *buf = 0; }
 
-	virtual uint32_t calcSize() { return 0; }
-	virtual void Serialize(void *) {}
+	virtual uint32_t calcSize() { printf("WARNING!\n"); return 0; }
+	virtual void Serialize(void *) { printf("WARNING!\n"); }
 	
 	virtual bool isMap() { return false; }
 	virtual bool isList() { return false; }

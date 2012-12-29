@@ -347,33 +347,88 @@ HtsBin::~HtsBin()
 HtsMessage HtsMessage::Deserialize(uint32_t length, void *buf)
 {
 	char *tmpbuf = (char*)buf;
-	if(tmpbuf[0] != 1) // Root element is not a map, something is wrong here.
-		return HtsMessage();
-	return HtsMap(length, tmpbuf).makeMsg();
+
+	HtsMap res;
+	
+	while(length > 5)
+	{
+		unsigned char mtype = (unsigned char)tmpbuf[0];
+		unsigned char subNameLen = (unsigned char)tmpbuf[1];
+		uint32_t subLen = ntohl(*((uint32_t*)(tmpbuf+2)));
+		
+		uint32_t psize = 6;
+		psize += subNameLen;
+		psize += subLen;
+		
+		std::shared_ptr<HtsData> newData;
+		switch(mtype)
+		{
+			case 1:
+				newData = std::make_shared<HtsMap>(psize, tmpbuf);
+				break;
+			case 2:
+				newData = std::make_shared<HtsInt>(psize, tmpbuf);
+				break;
+			case 3:
+				newData = std::make_shared<HtsStr>(psize, tmpbuf);
+				break;
+			case 4:
+				newData = std::make_shared<HtsBin>(psize, tmpbuf);
+				break;
+			case 5:
+				newData = std::make_shared<HtsList>(psize, tmpbuf);
+				break;
+		}
+		
+		res.setData(newData->getName(), newData);
+		
+		length -= psize;
+		tmpbuf += psize;
+	}
+	
+	return res.makeMsg();
 }
 
 bool HtsMessage::Serialize(uint32_t *length, void **buf)
 {
 	unsigned char *resBuf = 0;
-	uint32_t resLength = 0;
+	uint32_t resLength = 4;
 	*length = 0;
 	*buf = 0;
 
 	HtsMap map = getRoot();
-	resLength = map.calcSize();
-	resBuf = (unsigned char*)malloc(resLength + 4);
-
-	*((uint32_t*)resBuf) = htonl(resLength);
-	map.Serialize(resBuf + 4);
+	auto umap = map.getRawData();
+	for(auto it = umap.begin(); it != umap.end(); ++it)
+		resLength += it->second->calcSize();
 	
-	printf("Calculated total size %d\n", resLength);
+	resBuf = (unsigned char*)malloc(resLength);
+	memset(resBuf, 0xFF, resLength);
+	
+	*((uint32_t*)resBuf) = htonl(resLength);
+
+	char *tmpbuf = (char*)resBuf;
+	tmpbuf += 4;
+
+	for(auto it = umap.begin(); it != umap.end(); ++it)
+	{
+		it->second->Serialize(tmpbuf);
+		tmpbuf += it->second->calcSize();
+	}
+	
+	printf("Calculated total size %d\n", resLength + 4);
 	for(uint32_t i = 0; i < resLength; i++)
 	{
-		printf("0x%X ", resBuf[i]);
+		char an = resBuf[i];
+		if((an >= 'a' && an <= 'z') || (an >= 'A' && an <= 'Z'))
+			an = resBuf[i];
+		else
+			an = '-';
+		
+		printf("0x%X(%c) ", resBuf[i], an);
 	}
 	printf("\n");
 
-	*length = resLength;
+	*length = resLength+4;
 	*buf = resBuf;
 	return true;
 }
@@ -409,12 +464,9 @@ void HtsMap::Serialize(void *buf)
 		tmpbuf += getName().length();
 	}
 	
-	printf("Serializing map!\n");
-	
 	for(auto it = data.begin(); it != data.end(); ++it)
 	{
 		std::shared_ptr<HtsData> dat = it->second;
-		printf("Serializing %s with type %d!\n", dat->getName().c_str(), dat->getType());
 		dat->Serialize(tmpbuf);
 		tmpbuf += dat->calcSize();
 	}
@@ -509,8 +561,6 @@ void HtsInt::Serialize(void *buf)
 	{
 		tmpbuf[len-i] = datap[len-i]; //TODO: Find out correct order!
 	}
-	
-	printf(" -> Wrote int %d with name %s and size %d\n", (uint32_t)data, getName().c_str(), len);
 }
 
 uint32_t HtsStr::calcSize()
@@ -534,7 +584,7 @@ void HtsStr::Serialize(void *buf)
 		tmpbuf += getName().length();
 	}
 	
-	memcpy(buf, data.c_str(), data.length());
+	memcpy(tmpbuf, data.c_str(), data.length());
 }
 
 uint32_t HtsBin::calcSize()
