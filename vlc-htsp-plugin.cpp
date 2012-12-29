@@ -308,7 +308,7 @@ bool ConnectHTSP(demux_t *demux)
 	HtsMap map;
 	map.setData("method", std::make_shared<HtsStr>("hello"));
 	map.setData("clientname", std::make_shared<HtsStr>("VLC media player"));
-	map.setData("htspversion", std::make_shared<HtsInt>(7));
+	map.setData("htspversion", std::make_shared<HtsInt>(1337));
 
 	printf("1\n");
 	HtsMessage m = ReadResult(demux, map.makeMsg());

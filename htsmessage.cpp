@@ -266,9 +266,7 @@ HtsInt::HtsInt(uint32_t /*length*/, void *buf)
 	char *datap = (char*)&data;
 	
 	for(uint32_t i = len; i > 0; i--)
-		datap[7 + i - len] = tmpbuf[i-1];
-	
-	data = endian64(data);
+		datap[len-i] = tmpbuf[len-i]; //TODO: Find out correct order
 }
 
 
@@ -364,9 +362,16 @@ bool HtsMessage::Serialize(uint32_t *length, void **buf)
 	HtsMap map = getRoot();
 	resLength = map.calcSize();
 	resBuf = (char*)malloc(resLength + 4);
-	
+
 	*((uint32_t*)resBuf) = htonl(resLength);
 	map.Serialize(resBuf + 4);
+	
+	printf("Calculated total size %d\n", resLength);
+	for(uint32_t i = 0; i < resLength; i++)
+	{
+		printf("0x%X ", resBuf[i]);
+	}
+	printf("\n");
 
 	*length = resLength;
 	*buf = resBuf;
@@ -488,7 +493,7 @@ void HtsInt::Serialize(void *buf)
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
 	
-	*((uint32_t*)(tmpbuf + 2)) = htonl(pCalcSize());
+	*((uint32_t*)(tmpbuf + 2)) = htonl(len);
 	tmpbuf += 6;
 	
 	if(getName().length() > 0)
@@ -497,13 +502,15 @@ void HtsInt::Serialize(void *buf)
 		tmpbuf += getName().length();
 	}
 	
-	int64_t tmp = endian64(data);
+	int64_t tmp = data;
 	char *datap = (char*)&tmp;
 	
 	for(uint32_t i = len; i > 0; i--)
-		tmpbuf[i-1] = datap[7 + i - len];
+	{
+		tmpbuf[len-i] = datap[len-i]; //TODO: Find out correct order!
+	}
 	
-	printf("Wrote int %d with name %s and size %d\n", (uint32_t)data, getName().c_str(), len);
+	printf(" -> Wrote int %d with name %s and size %d\n", (uint32_t)data, getName().c_str(), len);
 }
 
 uint32_t HtsStr::calcSize()
