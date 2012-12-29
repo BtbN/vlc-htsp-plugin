@@ -551,7 +551,6 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			return VLC_SUCCESS;
 		case DEMUX_GET_PTS_DELAY:
 			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching") + sys->ptsDelay;
-			msg_Dbg(demux, "VLC Requested PTS_DELAY!");
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
 			*va_arg(args, int64_t*) = sys->lastPcr;
@@ -813,7 +812,7 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 			block->i_flags = BLOCK_FLAG_TYPE_P;
 	}
 
-	/*mtime_t pcr = 0;
+	mtime_t pcr = 0;
 	mtime_t bpcr = 0;
 	int bstream = 0, nbstream = 0;
 	for(uint32_t i = 0; i < sys->streamCount; i++)
@@ -823,7 +822,7 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 			pcr = sys->stream[i].lastDts;
 			nbstream = i+1;
 		}
-		if(sys->stream[i].lastPts > 0 && (sys->stream[i].lastDts > bpcr || pcr == 0))
+		if(sys->stream[i].lastPts > 0 && (sys->stream[i].lastDts > bpcr || bpcr == 0))
 		{
 			bpcr = sys->stream[i].lastDts;
 			bstream = i+1;
@@ -832,15 +831,9 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 
 	if(pcr > sys->lastPcr + sys->ptsDelay && pcr > 0)
 	{
-		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr);
+		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr - sys->ptsDelay);
 		sys->lastPcr = pcr;
 		msg_Dbg(demux, "Sent PCR %ld from stream %d, biggest current pcr is %ld from stream %d, diff %ld with a delay of %ld", pcr, nbstream, bpcr, bstream, bpcr - pcr, sys->ptsDelay);
-	}*/
-	
-	if(index == sys->pcrStream && dts && sys->lastPcr < mdate() - 300000)
-	{
-		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + dts - sys->ptsDelay);
-		sys->lastPcr = mdate();
 	}
 
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
