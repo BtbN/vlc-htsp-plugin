@@ -354,14 +354,14 @@ HtsMessage HtsMessage::Deserialize(uint32_t length, void *buf)
 
 bool HtsMessage::Serialize(uint32_t *length, void **buf)
 {
-	char *resBuf = 0;
+	unsigned char *resBuf = 0;
 	uint32_t resLength = 0;
 	*length = 0;
 	*buf = 0;
 
 	HtsMap map = getRoot();
 	resLength = map.calcSize();
-	resBuf = (char*)malloc(resLength + 4);
+	resBuf = (unsigned char*)malloc(resLength + 4);
 
 	*((uint32_t*)resBuf) = htonl(resLength);
 	map.Serialize(resBuf + 4);
