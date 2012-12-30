@@ -709,8 +709,14 @@ bool ParseSubscriptionStatus(demux_t *demux, HtsMessage &msg)
 
 bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 {
-	VLC_UNUSED(demux);
-	VLC_UNUSED(msg);
+	msg_Dbg(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %ld, Bdrops: %d, Pdrops: %d, Idrops: %d",
+		msg.getRoot().getU32("subscriptionId"),
+		msg.getRoot().getU32("packets"),
+		msg.getRoot().getU32("bytes"),
+		msg.getRoot().getS64("delay"),
+		msg.getRoot().getU32("Bdrops"),
+		msg.getRoot().getU32("Pdrops"),
+		msg.getRoot().getU32("Idrops"));
 	return true;
 }
 
