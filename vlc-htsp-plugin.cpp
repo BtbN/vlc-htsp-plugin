@@ -709,7 +709,7 @@ bool ParseSubscriptionStatus(demux_t *demux, HtsMessage &msg)
 
 bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 {
-	msg_Dbg(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %ld, Bdrops: %d, Pdrops: %d, Idrops: %d",
+	msg_Dbg(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %lld, Bdrops: %d, Pdrops: %d, Idrops: %d",
 		msg.getRoot().getU32("subscriptionId"),
 		msg.getRoot().getU32("packets"),
 		msg.getRoot().getU32("bytes"),

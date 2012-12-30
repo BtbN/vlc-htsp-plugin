@@ -244,28 +244,30 @@ void HtsList::appendData(std::shared_ptr<HtsData> newData)
 HtsInt::HtsInt(uint32_t /*length*/, void *buf)
 {
 	data = 0;
-	char *tmpbuf = (char*)buf;
+	unsigned char *tmpbuf = (unsigned char*)buf;
 	
 	if(tmpbuf[0] != getType())
 		return;
 	
-	unsigned char nlen = (unsigned char)tmpbuf[1];
+	unsigned char nlen = tmpbuf[1];
 	uint32_t len = ntohl(*((uint32_t*)(tmpbuf+2)));
 	if(len > 8)
 		len = 8;
+	if(len == 0)
+		return;
 	
 	tmpbuf += 6;
 	
 	if(nlen > 0)
 	{
-		setName(std::string(tmpbuf, (size_t)nlen));
+		setName(std::string((char*)tmpbuf, (size_t)nlen));
 		tmpbuf += nlen;
 	}
 	
-	char *datap = (char*)&data;
-	
-	for(uint32_t i = len; i > 0; i--)
-		datap[len-i] = tmpbuf[len-i]; //TODO: Find out correct order
+	uint64_t u64 = 0;
+	for(int32_t i = len - 1; i >= 0; i--)
+		u64 = (u64 << 8) | tmpbuf[i];
+	data = u64;
 }
 
 
@@ -517,29 +519,20 @@ uint32_t HtsInt::calcSize()
 
 uint32_t HtsInt::pCalcSize()
 {
-	if(data < 0)
-		return 8;
-	if(data <= 0xFF)
-		return 1;
-	if(data <= 0xFFFF)
-		return 2;
-	if(data <= 0xFFFFFF)
-		return 3;
-	if(data <= 0xFFFFFFFF)
-		return 4;
-	if(data <= 0xFFFFFFFFFF)
-		return 5;
-	if(data <= 0xFFFFFFFFFFFF)
-		return 6;
-	if(data <= 0xFFFFFFFFFFFFFF)
-		return 7;
-	return 8;
+	uint64_t u64 = data;
+	uint32_t res = 0;
+	while(u64 != 0)
+	{
+		++res;
+		u64 = u64 >> 8;
+	}
+	return res;
 }
 
 void HtsInt::Serialize(void *buf)
 {
 	uint32_t len = pCalcSize();
-	char *tmpbuf = (char*)buf;
+	unsigned char *tmpbuf = (unsigned char*)buf;
 	
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
@@ -553,12 +546,11 @@ void HtsInt::Serialize(void *buf)
 		tmpbuf += getName().length();
 	}
 	
-	int64_t tmp = data;
-	char *datap = (char*)&tmp;
-	
-	for(uint32_t i = len; i > 0; i--)
+	uint64_t u64 = data;
+	for(uint32_t i = 0; i < len; i++)
 	{
-		tmpbuf[len-i] = datap[len-i]; //TODO: Find out correct order!
+		tmpbuf[i] = (unsigned char)(u64 & 0xFF);
+		u64 = u64 >> 8;
 	}
 }
 
