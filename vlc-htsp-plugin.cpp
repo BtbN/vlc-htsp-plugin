@@ -437,7 +437,7 @@ bool SubscribeHTSP(demux_t *demux)
 	map.setData("channelId", sys->channelId);
 	map.setData("subscriptionId", 1);
 	map.setData("timeshiftPeriod", (uint32_t)~0);
-	map.setData("queueDepth", 50000000);
+	map.setData("queueDepth", 5*1024*1024);
 	//map.setData("90khz", std::make_shared<HtsInt>(1));
 	//map.setData("normts", std::make_shared<HtsInt>(1));
 
@@ -696,15 +696,13 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
 bool ParseSubscriptionStop(demux_t *demux, HtsMessage &msg)
 {
-	VLC_UNUSED(demux);
-	VLC_UNUSED(msg);
+	msg_Info(demux, "HTS Subscription Stop: subscriptionId: %d, status: %s", msg.getRoot().getU32("subscriptionId"), msg.getRoot().getStr("status").c_str());
 	return false;
 }
 
 bool ParseSubscriptionStatus(demux_t *demux, HtsMessage &msg)
 {
-	VLC_UNUSED(demux);
-	VLC_UNUSED(msg);
+	msg_Dbg(demux, "HTS Subscription Status: subscriptionId: %d, status: %s", msg.getRoot().getU32("subscriptionId"), msg.getRoot().getStr("status").c_str());
 	return true;
 }
 
