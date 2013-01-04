@@ -84,6 +84,7 @@ struct demux_sys_t
 		,channelId(0)
 		,nextSeqNum(1)
 		,hadIFrame(false)
+		,drops(0)
 	{}
 
 	~demux_sys_t()
@@ -123,6 +124,8 @@ struct demux_sys_t
 	std::deque<HtsMessage> queue;
 
 	bool hadIFrame;
+	
+	uint32_t drops;
 };
 
 #define DEMUX_EOF 0
@@ -708,10 +711,13 @@ bool ParseSubscriptionStatus(demux_t *demux, HtsMessage &msg)
 
 bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 {
+	demux_sys_t *sys = demux->p_sys;
+
 	uint32_t drops = msg.getRoot().getU32("Bdrops") + msg.getRoot().getU32("Pdrops") + msg.getRoot().getU32("Idrops");
-	if(drops > 0)
+	if(drops > sys->drops)
 	{
-		msg_Warn(demux, "Can't keep up! HTS dropped %d frames!", drops);
+		
+		msg_Warn(demux, "Can't keep up! HTS dropped %d frames!", drops - sys->drops);
 		msg_Warn(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %lld, Bdrops: %d, Pdrops: %d, Idrops: %d",
 			msg.getRoot().getU32("subscriptionId"),
 			msg.getRoot().getU32("packets"),
@@ -720,6 +726,8 @@ bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 			msg.getRoot().getU32("Bdrops"),
 			msg.getRoot().getU32("Pdrops"),
 			msg.getRoot().getU32("Idrops"));
+		
+		sys->drops += drops;
 	}
 	else
 	{
