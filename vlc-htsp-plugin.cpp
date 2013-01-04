@@ -51,6 +51,8 @@ static int OpenSD(vlc_object_t *);
 static void CloseSD(vlc_object_t *);
 VLC_SD_PROBE_HELPER( "htsp", "Tvheadend HTSP", SD_CAT_LAN )
 
+#define CFG_PREFIX "htsp-"
+
 vlc_module_begin ()
 	set_shortname( "HTSP Protocol" )
 	set_description( "TVHeadend HTSP Protocol" )
@@ -65,16 +67,25 @@ vlc_module_begin ()
 	set_description( "TVHeadend HTSP Protocol Discovery" )
 	set_category( CAT_PLAYLIST )
 	set_subcategory ( SUBCAT_PLAYLIST_SD )
-	add_integer_with_range( "htsp-port", 9982, 1, 65536, "HTSP Server Port", "The port of the HTSP server to connect to", false )
-	add_string( "htsp-host", "127.0.0.1", "HTSP Server Address", "The IP/Hostname of the HTSP server to connect to", false )
-	add_string( "htsp-user", "", "HTSP Username", "The username for authentication with HTSP Server", false )
-	add_string( "htsp-pass", "", "HTSP Password", "The password for authentication with HTSP Server", false )
+	add_integer_with_range( CFG_PREFIX"port", 9982, 1, 65536, "HTSP Server Port", "The port of the HTSP server to connect to", false )
+	add_string( CFG_PREFIX"host", "localhost", "HTSP Server Address", "The IP/Hostname of the HTSP server to connect to", false )
+	add_string( CFG_PREFIX"user", "", "HTSP Username", "The username for authentication with HTSP Server", false )
+	add_string( CFG_PREFIX"pass", "", "HTSP Password", "The password for authentication with HTSP Server", false )
 	set_capability ( "services_discovery", 0 )
 	set_callbacks ( OpenSD, CloseSD )
 	add_shortcut( "hts", "htsp" )
 
 	VLC_SD_PROBE_SUBMODULE
 vlc_module_end ()
+
+static const char *const cfg_options[] =
+{
+	"port",
+	"host",
+	"user",
+	"pass",
+	NULL
+};
 
 struct hts_stream
 {
@@ -1116,13 +1127,19 @@ bool ConnectHTSP(services_discovery_t *sd)
 	const char *host = var_GetString(sd, "htsp-host");
 	int port = var_GetInteger(sd, "htsp-port");
 	
-	if(host == 0 || host[0] == 0 || sys->netfd >= 0)
-		return false;
+	if(host == 0 || host[0] == 0)
+		host = "localhost";
+
+	if(port == 0)
+		port = 9982;
 	
 	sys->netfd = net_ConnectTCP(sd, host, port);
 
 	if(sys->netfd < 0)
+	{
+		msg_Err(sd, "net_ConnectTCP failed");
 		return false;
+	}
 
 	HtsMap map;
 	map.setData("method", "hello");
@@ -1131,7 +1148,10 @@ bool ConnectHTSP(services_discovery_t *sd)
 
 	HtsMessage m = ReadResult(sd, map.makeMsg());
 	if(!m.isValid())
+	{
+		msg_Err(sd, "No valid hello response");
 		return false;
+	}
 
 	uint32_t chall_len;
 	void * chall;
@@ -1238,7 +1258,10 @@ bool GetChannels(services_discovery_t *sd)
 			const char *host = var_GetString(sd, "htsp-host");
 			if(host == 0 || host[0] == 0)
 				host = "localhost";
-			oss << host << ":" << var_GetInteger(sd, "htsp-port") << "/" << cid;
+			int port = var_GetInteger(sd, "htsp-port");
+			if(port == 0)
+				port = 9982;
+			oss << host << ":" << port << "/" << cid;
 
 			tmp_channel ch;
 			ch.name = cname;
@@ -1260,7 +1283,7 @@ bool GetChannels(services_discovery_t *sd)
 		if(unlikely(ch.item == 0))
 			return false;
 		
-		services_discovery_AddItem(sd, ch.item, "Channel");
+		services_discovery_AddItem(sd, ch.item, "Channels");
 		
 		sys->channelMap[ch.cid] = ch;
 	}
@@ -1298,8 +1321,11 @@ static int OpenSD(vlc_object_t *obj)
 		return VLC_ENOMEM;
 	sd->p_sys = sys;
 
+	config_ChainParse(sd, CFG_PREFIX, cfg_options, sd->p_cfg);
+	
 	if(!ConnectHTSP(sd))
 	{
+		msg_Err(sd, "Connecting to HTS Failed!");
 		return VLC_EGENERIC;
 	}
 
