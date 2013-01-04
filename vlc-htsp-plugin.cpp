@@ -704,7 +704,7 @@ static void CloseHTSP(vlc_object_t *obj)
 
 	if(sys->netfd >= 0)
 		net_Close(sys->netfd);
-		
+
 	delete sys;
 	sys = demux->p_sys = 0;
 }
@@ -1124,15 +1124,15 @@ bool ConnectHTSP(services_discovery_t *sd)
 {
 	services_discovery_sys_t *sys = sd->p_sys;
 
-	const char *host = var_GetString(sd, "htsp-host");
-	int port = var_GetInteger(sd, "htsp-port");
-	
+	const char *host = var_GetString(sd, CFG_PREFIX"host");
+	int port = var_GetInteger(sd, CFG_PREFIX"port");
+
 	if(host == 0 || host[0] == 0)
 		host = "localhost";
 
 	if(port == 0)
 		port = 9982;
-	
+
 	sys->netfd = net_ConnectTCP(sd, host, port);
 
 	if(sys->netfd < 0)
@@ -1163,8 +1163,8 @@ bool ConnectHTSP(services_discovery_t *sd)
 
 	msg_Info(sd, "Connected to HTSP Server %s, version %s, protocol %d", serverName.c_str(), serverVersion.c_str(), protoVersion);
 
-	const char *user = var_GetString(sd, "htsp-user");
-	const char *pass = var_GetString(sd, "htsp-pass");
+	const char *user = var_GetString(sd, CFG_PREFIX"user");
+	const char *pass = var_GetString(sd, CFG_PREFIX"pass");
 	if(user == 0 || user[0] == 0)
 		return true;
 
@@ -1247,18 +1247,18 @@ bool GetChannels(services_discovery_t *sd)
 
 			std::ostringstream oss;
 			oss << "htsp://";
-			
-			char *user = var_GetString(sd, "htsp-user");
-			char *pass = var_GetString(sd, "htsp-pass");
+
+			char *user = var_GetString(sd, CFG_PREFIX"user");
+			char *pass = var_GetString(sd, CFG_PREFIX"pass");
 			if(user != 0 && user[0] != 0 && pass != 0 && pass[0] != 0)
 				oss << user << ":" << pass << "@";
 			else if(user != 0 && user[0] != 0)
 				oss << user << "@";
-			
-			const char *host = var_GetString(sd, "htsp-host");
+
+			const char *host = var_GetString(sd, CFG_PREFIX"host");
 			if(host == 0 || host[0] == 0)
 				host = "localhost";
-			int port = var_GetInteger(sd, "htsp-port");
+			int port = var_GetInteger(sd, CFG_PREFIX"port");
 			if(port == 0)
 				port = 9982;
 			oss << host << ":" << port << "/" << cid;
@@ -1273,7 +1273,7 @@ bool GetChannels(services_discovery_t *sd)
 	}
 
 	channels.sort(compare_tmp_channel);
-	
+
 	while(channels.size() > 0)
 	{
 		tmp_channel ch = channels.front();
@@ -1282,12 +1282,12 @@ bool GetChannels(services_discovery_t *sd)
 		ch.item = input_item_New(ch.url.c_str(), ch.name.c_str());
 		if(unlikely(ch.item == 0))
 			return false;
-		
+
 		services_discovery_AddItem(sd, ch.item, "Channels");
-		
+
 		sys->channelMap[ch.cid] = ch;
 	}
-	
+
 	return true;
 }
 
@@ -1296,7 +1296,7 @@ void * RunSD(void *obj)
 	services_discovery_t *sd = (services_discovery_t *)obj;
 
 	GetChannels(sd);
-	
+
 	for(;;)
 	{
 		HtsMessage msg = ReadMessage(sd);
@@ -1306,7 +1306,7 @@ void * RunSD(void *obj)
 		std::string method = msg.getRoot().getStr("method");
 		if(method.empty())
 			return 0;
-		
+
 		msg_Dbg(sd, "Got Message with method %s", method.c_str());
 	}
 
@@ -1322,7 +1322,7 @@ static int OpenSD(vlc_object_t *obj)
 	sd->p_sys = sys;
 
 	config_ChainParse(sd, CFG_PREFIX, cfg_options, sd->p_cfg);
-	
+
 	if(!ConnectHTSP(sd))
 	{
 		msg_Err(sd, "Connecting to HTS Failed!");
@@ -1335,7 +1335,7 @@ static int OpenSD(vlc_object_t *obj)
 		delete sys;
 		return VLC_EGENERIC;
 	}
-	
+
 	return VLC_SUCCESS;
 }
 
@@ -1346,13 +1346,13 @@ static void CloseSD(vlc_object_t *obj)
 
 	if(!sys)
 		return;
-	
+
 	vlc_cancel(sys->thread);
 	vlc_join(sys->thread, 0);
 
 	if(sys->netfd >= 0)
 		net_Close(sys->netfd);
-	
+
 	delete sys;
 	sys = sd->p_sys = 0;
 }
