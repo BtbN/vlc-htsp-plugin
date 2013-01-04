@@ -655,7 +655,7 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
-
+	
 	if(sys->stream != 0)
 	{
 		for(uint32_t i = 0; i < sys->streamCount; i++)
@@ -665,6 +665,17 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 		sys->streamCount = 0;
 	}
 
+	if(msg.getRoot().contains("sourceinfo"))
+	{
+		std::shared_ptr<HtsMap> srcinfo = msg.getRoot().getMap("sourceinfo");
+		
+		vlc_meta_t *meta = vlc_meta_New();
+		vlc_meta_SetTitle(meta, srcinfo->getStr("service").c_str());
+		es_out_Control(demux->out, ES_OUT_SET_GROUP_META, (int)sys->channelId, meta);
+		vlc_meta_Delete(meta);
+		msg_Dbg(demux, "GOT SRC INFO: %s %s", srcinfo->getStr("adapter").c_str(), srcinfo->getStr("service").c_str());
+	}
+	
 	std::shared_ptr<HtsList> streams = msg.getRoot().getList("streams");
 	if(streams->count() <= 0)
 	{

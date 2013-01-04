@@ -79,6 +79,7 @@ class HtsMap : public HtsData
 	const std::string &getStr(const std::string &name);
 	void getBin(const std::string &name, uint32_t *len, void **buf);
 	std::shared_ptr<HtsList> getList(const std::string &name);
+	std::shared_ptr<HtsMap> getMap(const std::string &name);
 
 	std::unordered_map<std::string, std::shared_ptr<HtsData>> getRawData() { return data; }
 	std::shared_ptr<HtsData> getData(const std::string &name);

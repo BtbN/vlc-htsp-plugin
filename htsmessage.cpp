@@ -153,6 +153,14 @@ std::shared_ptr<HtsList> HtsMap::getList(const std::string &name)
 	return std::static_pointer_cast<HtsList>(dat);
 }
 
+std::shared_ptr<HtsMap> HtsMap::getMap(const std::string &name)
+{
+	std::shared_ptr<HtsData> dat = getData(name);
+	if(!dat->isMap())
+		return std::make_shared<HtsMap>();
+	return std::static_pointer_cast<HtsMap>(dat);
+}
+
 std::shared_ptr<HtsData> HtsMap::getData(const std::string &name)
 {
 	if(!contains(name))
