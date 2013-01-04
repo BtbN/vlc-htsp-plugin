@@ -25,11 +25,11 @@
 #include <string.h>
 
 
-static uint16_t bswap_16(uint16_t x)
+/*static uint16_t bswap_16(uint16_t x)
 {
     x= (x>>8) | (x<<8);
     return x;
-}
+}*/
 
 
 static uint32_t bswap_32(uint32_t x)
@@ -58,11 +58,11 @@ static uint64_t bswap_64(uint64_t x)
 #define be2me_16(x) (x)
 #define be2me_32(x) (x)
 #define be2me_64(x) (x)
-#define le2me_16(x) bswap_16(x)
+//#define le2me_16(x) bswap_16(x)
 #define le2me_32(x) bswap_32(x)
 #define le2me_64(x) bswap_64(x)
 #else
-#define be2me_16(x) bswap_16(x)
+//#define be2me_16(x) bswap_16(x)
 #define be2me_32(x) bswap_32(x)
 #define be2me_64(x) bswap_64(x)
 #define le2me_16(x) (x)

@@ -25,6 +25,7 @@
 #include <vlc_playlist.h>
 #include <vlc_url.h>
 #include <vlc_network.h>
+#include <vlc_epg.h>
 
 #include <ctime>
 #include <cerrno>
@@ -431,6 +432,45 @@ void PopulatePlaylist(demux_t *demux)
 	}
 }
 
+void PopulateEPG(demux_t *demux)
+{
+	demux_sys_t *sys = demux->p_sys;
+	
+	HtsMap map;
+	map.setData("method", "getEvents");
+	map.setData("channelId", sys->channelId);
+	
+	HtsMessage res = ReadResult(demux, map.makeMsg());
+	if(!res.isValid())
+		return;
+
+	vlc_epg_t *epg = vlc_epg_New(0);
+		
+	std::shared_ptr<HtsList> events = res.getRoot().getList("events");
+	for(uint32_t i = 0; i < events->count(); i++)
+	{
+		std::shared_ptr<HtsData> tmp = events->getData(i);
+		if(!tmp->isMap())
+			continue;
+		std::shared_ptr<HtsMap> event = std::static_pointer_cast<HtsMap>(tmp);
+		
+		if(event->getU32("channelId") != (uint32_t)sys->channelId)
+			continue;
+		
+		int64_t start = event->getS64("start");
+		int64_t stop = event->getS64("stop");
+		int duration = stop - start;
+		
+		vlc_epg_AddEvent(epg, start, duration, event->getStr("title").c_str(), event->getStr("summary").c_str(), event->getStr("description").c_str());
+		
+		int64_t now = time(0);
+		if(now >= start && now < stop)
+			vlc_epg_SetCurrent(epg, start);
+	}
+	es_out_Control(demux->out, ES_OUT_SET_GROUP_EPG, (int)sys->channelId, epg);
+	vlc_epg_Delete(epg);
+}
+
 bool SubscribeHTSP(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -518,6 +558,8 @@ static int OpenHTSP(vlc_object_t *obj)
 		return VLC_SUCCESS;
 	}
 
+	PopulateEPG(demux);
+	
 	if(!SubscribeHTSP(demux))
 	{
 		msg_Dbg(demux, "Subscribing to channel failed");
@@ -581,14 +623,14 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 		sys->streamCount = 0;
 	}
 
-	HtsList streams = msg.getRoot().getList("streams");
-	if(streams.count() <= 0)
+	std::shared_ptr<HtsList> streams = msg.getRoot().getList("streams");
+	if(streams->count() <= 0)
 	{
 		msg_Err(demux, "Malformed SubscriptionStart!");
 		return false;
 	}
 
-	sys->streamCount = streams.count();
+	sys->streamCount = streams->count();
 	msg_Dbg(demux, "Found %d elementary streams", sys->streamCount);
 
 	sys->stream = new hts_stream[sys->streamCount];
@@ -596,9 +638,9 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 	sys->pcrStream = 0;
 	sys->lastPcr = 0;
 
-	for(uint32_t jj = 0; jj < streams.count(); jj++)
+	for(uint32_t jj = 0; jj < streams->count(); jj++)
 	{
-		std::shared_ptr<HtsData> sub = streams.getData(jj);
+		std::shared_ptr<HtsData> sub = streams->getData(jj);
 		if(!sub->isMap())
 			continue;
 		std::shared_ptr<HtsMap> map = std::static_pointer_cast<HtsMap>(sub);
@@ -681,6 +723,8 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 			strncpy(fmt->psz_language, lang.c_str(), lang.length());
 			fmt->psz_language[lang.length()] = 0;
 		}
+		
+		fmt->i_group = sys->channelId;
 
 		sys->stream[i].es = es_out_Add(demux->out, fmt);
 

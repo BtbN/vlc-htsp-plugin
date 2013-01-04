@@ -54,6 +54,8 @@ int64_t endian64(int64_t v)
 	return res;
 }
 
+const std::string emptyString = std::string();
+
 HtsMap::HtsMap(uint32_t /*length*/, void *buf)
 {
 	char *tmpbuf = (char*)buf;
@@ -133,7 +135,7 @@ int64_t HtsMap::getS64(const std::string &name)
 	return getData(name)->getS64();
 }
 
-std::string HtsMap::getStr(const std::string &name)
+const std::string &HtsMap::getStr(const std::string &name)
 {
 	return getData(name)->getStr();
 }
@@ -143,12 +145,12 @@ void HtsMap::getBin(const std::string &name, uint32_t *len, void **buf)
 	getData(name)->getBin(len, buf);
 }
 
-HtsList HtsMap::getList(const std::string &name)
+std::shared_ptr<HtsList> HtsMap::getList(const std::string &name)
 {
 	std::shared_ptr<HtsData> dat = getData(name);
 	if(!dat->isList())
-		return HtsList();
-	return *std::static_pointer_cast<HtsList>(dat);
+		return std::make_shared<HtsList>();
+	return std::static_pointer_cast<HtsList>(dat);
 }
 
 std::shared_ptr<HtsData> HtsMap::getData(const std::string &name)

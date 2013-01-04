@@ -33,6 +33,8 @@ class HtsStr;
 class HtsBin;
 class HtsMessage;
 
+extern const std::string emptyString;
+
 class HtsData
 {
 	public:
@@ -41,7 +43,7 @@ class HtsData
 
 	virtual uint32_t getU32() { return 0; }
 	virtual int64_t getS64() { return 0; }
-	virtual std::string getStr() { return std::string(); }
+	virtual const std::string &getStr() { return emptyString; }
 	virtual void getBin(uint32_t *len, void **buf) const { *len = 0; *buf = 0; }
 
 	virtual uint32_t calcSize() { printf("WARNING!\n"); return 0; }
@@ -74,9 +76,9 @@ class HtsMap : public HtsData
 	bool contains(const std::string &name);
 	uint32_t getU32(const std::string &name);
 	int64_t getS64(const std::string &name);
-	std::string getStr(const std::string &name);
+	const std::string &getStr(const std::string &name);
 	void getBin(const std::string &name, uint32_t *len, void **buf);
-	HtsList getList(const std::string &name);
+	std::shared_ptr<HtsList> getList(const std::string &name);
 
 	std::unordered_map<std::string, std::shared_ptr<HtsData>> getRawData() { return data; }
 	std::shared_ptr<HtsData> getData(const std::string &name);
@@ -153,7 +155,7 @@ class HtsStr : public HtsData
 	HtsStr(uint32_t length, void *buf);
 	HtsStr(const std::string &str):data(str) {}
 
-	virtual std::string getStr() { return data; }
+	virtual const std::string &getStr() { return data; }
 
 	virtual uint32_t calcSize();
 	virtual void Serialize(void *buf);
