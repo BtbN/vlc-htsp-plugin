@@ -81,6 +81,11 @@ class HtsMap : public HtsData
 	std::unordered_map<std::string, std::shared_ptr<HtsData>> getRawData() { return data; }
 	std::shared_ptr<HtsData> getData(const std::string &name);
 	void setData(const std::string &name, std::shared_ptr<HtsData> newData);
+	void setData(const std::string &name, uint32_t newData);
+	void setData(const std::string &name, int32_t newData);
+	void setData(const std::string &name, uint64_t newData);
+	void setData(const std::string &name, int64_t newData);
+	void setData(const std::string &name, const std::string &newData);
 
 	virtual uint32_t calcSize();
 	virtual void Serialize(void *buf);

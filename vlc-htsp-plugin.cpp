@@ -226,7 +226,7 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 	if(sequence)
 	{
 		iSequence = HTSPNextSeqNum(sys);
-		m.getRoot().setData("seq", std::make_shared<HtsInt>(iSequence));
+		m.getRoot().setData("seq", iSequence);
 	}
 
 	if(!TransmitMessage(demux, m))
@@ -294,9 +294,9 @@ bool ConnectHTSP(demux_t *demux)
 		return false;
 
 	HtsMap map;
-	map.setData("method", std::make_shared<HtsStr>("hello"));
-	map.setData("clientname", std::make_shared<HtsStr>("VLC media player"));
-	map.setData("htspversion", std::make_shared<HtsInt>(7));
+	map.setData("method", "hello");
+	map.setData("clientname", "VLC media player");
+	map.setData("htspversion", 7);
 
 	HtsMessage m = ReadResult(demux, map.makeMsg());
 	if(!m.isValid())
@@ -316,8 +316,8 @@ bool ConnectHTSP(demux_t *demux)
 		return true;
 
 	map = HtsMap();
-	map.setData("method", std::make_shared<HtsStr>("authenticate"));
-	map.setData("username", std::make_shared<HtsStr>(sys->username));
+	map.setData("method", "authenticate");
+	map.setData("username", sys->username);
 
 	if(sys->password != "" && chall)
 	{
@@ -370,7 +370,7 @@ void PopulatePlaylist(demux_t *demux)
 	playlist_t *pl = pl_Get(demux);
 
 	HtsMap map;
-	map.setData("method", std::make_shared<HtsStr>("enableAsyncMetadata"));
+	map.setData("method", "enableAsyncMetadata");
 	if(!ReadSuccess(demux, map.makeMsg(), "enable async metadata"))
 		return;
 
@@ -433,10 +433,11 @@ bool SubscribeHTSP(demux_t *demux)
 	demux_sys_t *sys = demux->p_sys;
 
 	HtsMap map;
-	map.setData("method", std::make_shared<HtsStr>("subscribe"));
-	map.setData("channelId", std::make_shared<HtsInt>(sys->channelId));
-	map.setData("subscriptionId", std::make_shared<HtsInt>(1));
-	map.setData("timeshiftPeriod", std::make_shared<HtsInt>((uint32_t)~0));
+	map.setData("method", "subscribe");
+	map.setData("channelId", sys->channelId);
+	map.setData("subscriptionId", 1);
+	map.setData("timeshiftPeriod", (uint32_t)~0);
+	map.setData("queueDepth", 50000000);
 	//map.setData("90khz", std::make_shared<HtsInt>(1));
 	//map.setData("normts", std::make_shared<HtsInt>(1));
 
@@ -713,7 +714,7 @@ bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 		msg.getRoot().getU32("subscriptionId"),
 		msg.getRoot().getU32("packets"),
 		msg.getRoot().getU32("bytes"),
-		msg.getRoot().getS64("delay"),
+		(long long int)msg.getRoot().getS64("delay"),
 		msg.getRoot().getU32("Bdrops"),
 		msg.getRoot().getU32("Pdrops"),
 		msg.getRoot().getU32("Idrops"));
@@ -821,18 +822,15 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 
 	mtime_t pcr = 0;
 	mtime_t bpcr = 0;
-	int bstream = 0, nbstream = 0;
 	for(uint32_t i = 0; i < sys->streamCount; i++)
 	{
 		if(sys->stream[i].lastDts > 0 && (sys->stream[i].lastDts < pcr || pcr == 0))
 		{
 			pcr = sys->stream[i].lastDts;
-			nbstream = i+1;
 		}
 		if(sys->stream[i].lastPts > 0 && (sys->stream[i].lastDts > bpcr || bpcr == 0))
 		{
 			bpcr = sys->stream[i].lastDts;
-			bstream = i+1;
 		}
 	}
 

@@ -164,6 +164,31 @@ void HtsMap::setData(const std::string &name, std::shared_ptr<HtsData> newData)
 	data[name] = newData;
 }
 
+void HtsMap::setData(const std::string &name, uint32_t newData)
+{
+	setData(name, std::make_shared<HtsInt>(newData));
+}
+
+void HtsMap::setData(const std::string &name, int32_t newData)
+{
+	setData(name, std::make_shared<HtsInt>(newData));
+}
+
+void HtsMap::setData(const std::string &name, uint64_t newData)
+{
+	setData(name, std::make_shared<HtsInt>(newData));
+}
+
+void HtsMap::setData(const std::string &name, int64_t newData)
+{
+	setData(name, std::make_shared<HtsInt>(newData));
+}
+
+void HtsMap::setData(const std::string &name, const std::string &newData)
+{
+	setData(name, std::make_shared<HtsStr>(newData));
+}
+
 
 HtsList::HtsList(uint32_t /*length*/, void *buf)
 {
