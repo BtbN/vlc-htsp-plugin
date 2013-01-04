@@ -708,14 +708,30 @@ bool ParseSubscriptionStatus(demux_t *demux, HtsMessage &msg)
 
 bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 {
-	msg_Dbg(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %lld, Bdrops: %d, Pdrops: %d, Idrops: %d",
-		msg.getRoot().getU32("subscriptionId"),
-		msg.getRoot().getU32("packets"),
-		msg.getRoot().getU32("bytes"),
-		(long long int)msg.getRoot().getS64("delay"),
-		msg.getRoot().getU32("Bdrops"),
-		msg.getRoot().getU32("Pdrops"),
-		msg.getRoot().getU32("Idrops"));
+	uint32_t drops = msg.getRoot().getU32("Bdrops") + msg.getRoot().getU32("Pdrops") + msg.getRoot().getU32("Idrops");
+	if(drops > 0)
+	{
+		msg_Warn(demux, "Can't keep up! HTS dropped %d frames!", drops);
+		msg_Warn(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %lld, Bdrops: %d, Pdrops: %d, Idrops: %d",
+			msg.getRoot().getU32("subscriptionId"),
+			msg.getRoot().getU32("packets"),
+			msg.getRoot().getU32("bytes"),
+			(long long int)msg.getRoot().getS64("delay"),
+			msg.getRoot().getU32("Bdrops"),
+			msg.getRoot().getU32("Pdrops"),
+			msg.getRoot().getU32("Idrops"));
+	}
+	else
+	{
+		msg_Dbg(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %lld, Bdrops: %d, Pdrops: %d, Idrops: %d",
+			msg.getRoot().getU32("subscriptionId"),
+			msg.getRoot().getU32("packets"),
+			msg.getRoot().getU32("bytes"),
+			(long long int)msg.getRoot().getS64("delay"),
+			msg.getRoot().getU32("Bdrops"),
+			msg.getRoot().getU32("Pdrops"),
+			msg.getRoot().getU32("Idrops"));
+	}
 	return true;
 }
 
