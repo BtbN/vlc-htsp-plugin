@@ -26,6 +26,7 @@
 #include <vlc_url.h>
 #include <vlc_network.h>
 #include <vlc_epg.h>
+#include <vlc_meta.h>
 
 #include <ctime>
 #include <cerrno>
@@ -35,6 +36,7 @@
 #include <string>
 #include <memory>
 #include <sstream>
+#include <unordered_map>
 
 #include "htsmessage.h"
 #include "sha1.h"
@@ -125,7 +127,7 @@ struct demux_sys_t
 	std::deque<HtsMessage> queue;
 
 	bool hadIFrame;
-	
+
 	uint32_t drops;
 };
 
@@ -375,10 +377,14 @@ void PopulatePlaylist(demux_t *demux)
 
 	HtsMap map;
 	map.setData("method", "enableAsyncMetadata");
+	map.setData("epg", 1);
 	if(!ReadSuccess(demux, map.makeMsg(), "enable async metadata"))
 		return;
 
 	std::list<tmp_channel> channels;
+
+	std::unordered_map<uint32_t, vlc_meta_t*> metaData;
+	std::unordered_map<uint32_t, vlc_epg_t*> epgData;
 
 	HtsMessage m;
 	while((m = ReadMessage(demux)).isValid())
@@ -417,12 +423,48 @@ void PopulatePlaylist(demux_t *demux)
 			ch.cid = cnum;
 			ch.url = oss.str();
 			channels.push_back(ch);
+
+			if(metaData.count(cid) < 1)
+				metaData[cid] = vlc_meta_New();
+
+			vlc_meta_SetTitle(metaData[cid], cname.c_str());
+		}
+		else if(method == "eventAdd")
+		{
+			if(!m.getRoot().contains("channelId"))
+				continue;
+			uint32_t cid = m.getRoot().getU32("channelId");
+
+			if(epgData.count(cid) < 1)
+				epgData[cid] = vlc_epg_New(0);
+
+			int64_t start = m.getRoot().getS64("start");
+			int64_t stop = m.getRoot().getS64("stop");
+			int duration = stop - start;
+
+			vlc_epg_AddEvent(epgData[cid], start, duration, m.getRoot().getStr("title").c_str(), m.getRoot().getStr("summary").c_str(), m.getRoot().getStr("description").c_str());
+
+			int64_t now = time(0);
+			if(now >= start && now < stop)
+				vlc_epg_SetCurrent(epgData[cid], start);
 		}
 	}
 
 	channels.sort(compare_tmp_channel);
-
 	playlist_Clear(pl, false);
+
+	for(auto it = metaData.begin(); it != metaData.end(); ++it)
+	{
+		es_out_Control(demux->out, ES_OUT_SET_GROUP_META, (int)it->first, it->second);
+		vlc_meta_Delete(it->second);
+	}
+
+	for(auto it = epgData.begin(); it != epgData.end(); ++it)
+	{
+		es_out_Control(demux->out, ES_OUT_SET_GROUP_EPG, (int)it->first, it->second);
+		vlc_epg_Delete(it->second);
+	}
+
 	while(channels.size() > 0)
 	{
 		tmp_channel ch = channels.front();
@@ -435,17 +477,17 @@ void PopulatePlaylist(demux_t *demux)
 void PopulateEPG(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
-	
+
 	HtsMap map;
 	map.setData("method", "getEvents");
 	map.setData("channelId", sys->channelId);
-	
+
 	HtsMessage res = ReadResult(demux, map.makeMsg());
 	if(!res.isValid())
 		return;
 
 	vlc_epg_t *epg = vlc_epg_New(0);
-		
+
 	std::shared_ptr<HtsList> events = res.getRoot().getList("events");
 	for(uint32_t i = 0; i < events->count(); i++)
 	{
@@ -453,21 +495,16 @@ void PopulateEPG(demux_t *demux)
 		if(!tmp->isMap())
 			continue;
 		std::shared_ptr<HtsMap> event = std::static_pointer_cast<HtsMap>(tmp);
-		
+
 		if(event->getU32("channelId") != (uint32_t)sys->channelId)
 			continue;
-		
+
 		int64_t start = event->getS64("start");
 		int64_t stop = event->getS64("stop");
 		int duration = stop - start;
-		
+
 		vlc_epg_AddEvent(epg, start, duration, event->getStr("title").c_str(), event->getStr("summary").c_str(), event->getStr("description").c_str());
-		
-		msg_Dbg(demux, "Found new EPG Entry: start: %lld, stop: %lld, title: \"%s\"",
-			(long long int)start,
-			(long long int)stop,
-			event->getStr("title").c_str());
-		
+
 		int64_t now = time(0);
 		if(now >= start && now < stop)
 			vlc_epg_SetCurrent(epg, start);
@@ -564,7 +601,7 @@ static int OpenHTSP(vlc_object_t *obj)
 	}
 
 	PopulateEPG(demux);
-	
+
 	if(!SubscribeHTSP(demux))
 	{
 		msg_Dbg(demux, "Subscribing to channel failed");
@@ -728,7 +765,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 			strncpy(fmt->psz_language, lang.c_str(), lang.length());
 			fmt->psz_language[lang.length()] = 0;
 		}
-		
+
 		fmt->i_group = sys->channelId;
 
 		sys->stream[i].es = es_out_Add(demux->out, fmt);
@@ -765,7 +802,7 @@ bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 	uint32_t drops = msg.getRoot().getU32("Bdrops") + msg.getRoot().getU32("Pdrops") + msg.getRoot().getU32("Idrops");
 	if(drops > sys->drops)
 	{
-		
+
 		msg_Warn(demux, "Can't keep up! HTS dropped %d frames!", drops - sys->drops);
 		msg_Warn(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %lld, Bdrops: %d, Pdrops: %d, Idrops: %d",
 			msg.getRoot().getU32("subscriptionId"),
@@ -775,7 +812,7 @@ bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 			msg.getRoot().getU32("Bdrops"),
 			msg.getRoot().getU32("Pdrops"),
 			msg.getRoot().getU32("Idrops"));
-		
+
 		sys->drops += drops;
 	}
 	else
