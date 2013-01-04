@@ -38,10 +38,10 @@ int64_t endian64(int64_t v)
 		return v;
 
 	int64_t res = 0;
-	
+
 	char *vp = (char*)&v;
 	char *rp = (char*)&res;
-	
+
 	rp[0] = vp[7];
 	rp[1] = vp[6];
 	rp[2] = vp[5];
@@ -50,40 +50,40 @@ int64_t endian64(int64_t v)
 	rp[5] = vp[2];
 	rp[6] = vp[1];
 	rp[7] = vp[0];
-	
+
 	return res;
 }
 
 HtsMap::HtsMap(uint32_t /*length*/, void *buf)
 {
 	char *tmpbuf = (char*)buf;
-	
+
 	if(tmpbuf[0] != getType())
 		return;
 	tmpbuf += 1;
-	
+
 	unsigned char nlen = (unsigned char)tmpbuf[0];
 	tmpbuf += 1;
-	
+
 	int64_t mlen = ntohl(*((uint32_t*)tmpbuf));
 	tmpbuf += sizeof(uint32_t);
-	
+
 	if(nlen > 0)
 	{
 		setName(std::string(tmpbuf, (size_t)nlen));
 		tmpbuf += nlen;
 	}
-	
+
 	while(mlen > 0)
 	{
 		unsigned char mtype = (unsigned char)tmpbuf[0];
 		unsigned char subNameLen = (unsigned char)tmpbuf[1];
 		uint32_t subLen = ntohl(*((uint32_t*)(tmpbuf+2)));
-		
+
 		uint32_t psize = 1+1+4;
 		psize += subNameLen;
 		psize += subLen;
-		
+
 		std::shared_ptr<HtsData> newData;
 		switch(mtype)
 		{
@@ -103,9 +103,9 @@ HtsMap::HtsMap(uint32_t /*length*/, void *buf)
 				newData = std::make_shared<HtsList>(psize, tmpbuf);
 				break;
 		}
-		
+
 		setData(newData->getName(), newData);
-		
+
 		tmpbuf += psize;
 		mlen -= psize;
 	}
@@ -193,14 +193,14 @@ void HtsMap::setData(const std::string &name, const std::string &newData)
 HtsList::HtsList(uint32_t /*length*/, void *buf)
 {
 	char *tmpbuf = (char*)buf;
-	
+
 	if(tmpbuf[0] != getType())
 		return;
 	tmpbuf += 1;
-	
+
 	unsigned char nlen = (unsigned char)tmpbuf[0];
 	tmpbuf += 1;
-	
+
 	int64_t mlen = ntohl(*((uint32_t*)tmpbuf));
 	tmpbuf += sizeof(uint32_t);
 
@@ -209,17 +209,17 @@ HtsList::HtsList(uint32_t /*length*/, void *buf)
 		setName(std::string(tmpbuf, (size_t)nlen));
 		tmpbuf += nlen;
 	}
-	
+
 	while(mlen > 0)
 	{
 		unsigned char mtype = (unsigned char)tmpbuf[0];
 		unsigned char subNameLen = (unsigned char)tmpbuf[1];
 		uint32_t subLen = ntohl(*((uint32_t*)(tmpbuf+2)));
-		
+
 		uint32_t psize = 1+1+4;
 		psize += subNameLen;
 		psize += subLen;
-		
+
 		std::shared_ptr<HtsData> newData;
 		switch(mtype)
 		{
@@ -241,7 +241,7 @@ HtsList::HtsList(uint32_t /*length*/, void *buf)
 		}
 
 		appendData(newData);
-		
+
 		tmpbuf += psize;
 		mlen -= psize;
 	}
@@ -270,25 +270,25 @@ HtsInt::HtsInt(uint32_t /*length*/, void *buf)
 {
 	data = 0;
 	unsigned char *tmpbuf = (unsigned char*)buf;
-	
+
 	if(tmpbuf[0] != getType())
 		return;
-	
+
 	unsigned char nlen = tmpbuf[1];
 	uint32_t len = ntohl(*((uint32_t*)(tmpbuf+2)));
 	if(len > 8)
 		len = 8;
 	if(len == 0)
 		return;
-	
+
 	tmpbuf += 6;
-	
+
 	if(nlen > 0)
 	{
 		setName(std::string((char*)tmpbuf, (size_t)nlen));
 		tmpbuf += nlen;
 	}
-	
+
 	uint64_t u64 = 0;
 	for(int32_t i = len - 1; i >= 0; i--)
 		u64 = (u64 << 8) | tmpbuf[i];
@@ -302,18 +302,18 @@ HtsStr::HtsStr(uint32_t /*length*/, void *buf)
 
 	if(tmpbuf[0] != getType())
 		return;
-	
+
 	unsigned char nlen = (unsigned char)tmpbuf[1];
 	uint32_t len = ntohl(*((uint32_t*)(tmpbuf+2)));
-	
+
 	tmpbuf += 6;
-	
+
 	if(nlen > 0)
 	{
 		setName(std::string(tmpbuf, (size_t)nlen));
 		tmpbuf += nlen;
 	}
-	
+
 	data = std::string(tmpbuf, (size_t)len);
 }
 
@@ -329,18 +329,18 @@ HtsBin::HtsBin(uint32_t /*length*/, void *buf)
 
 	if(tmpbuf[0] != getType())
 		return;
-	
+
 	unsigned char nlen = (unsigned char)tmpbuf[1];
 	data_length = ntohl(*((uint32_t*)(tmpbuf+2)));
 
 	tmpbuf += 6;
-	
+
 	if(nlen > 0)
 	{
 		setName(std::string(tmpbuf, (size_t)nlen));
 		tmpbuf += nlen;
 	}
-	
+
 	data_buf = malloc(data_length);
 	memcpy(data_buf, tmpbuf, data_length);
 }
@@ -375,17 +375,17 @@ HtsMessage HtsMessage::Deserialize(uint32_t length, void *buf)
 	char *tmpbuf = (char*)buf;
 
 	HtsMap res;
-	
+
 	while(length > 5)
 	{
 		unsigned char mtype = (unsigned char)tmpbuf[0];
 		unsigned char subNameLen = (unsigned char)tmpbuf[1];
 		uint32_t subLen = ntohl(*((uint32_t*)(tmpbuf+2)));
-		
+
 		uint32_t psize = 6;
 		psize += subNameLen;
 		psize += subLen;
-		
+
 		std::shared_ptr<HtsData> newData;
 		switch(mtype)
 		{
@@ -405,13 +405,13 @@ HtsMessage HtsMessage::Deserialize(uint32_t length, void *buf)
 				newData = std::make_shared<HtsList>(psize, tmpbuf);
 				break;
 		}
-		
+
 		res.setData(newData->getName(), newData);
-		
+
 		length -= psize;
 		tmpbuf += psize;
 	}
-	
+
 	return res.makeMsg();
 }
 
@@ -426,10 +426,10 @@ bool HtsMessage::Serialize(uint32_t *length, void **buf)
 	auto umap = map.getRawData();
 	for(auto it = umap.begin(); it != umap.end(); ++it)
 		resLength += it->second->calcSize();
-	
+
 	resBuf = (unsigned char*)malloc(resLength);
 	memset(resBuf, 0xFF, resLength);
-	
+
 	*((uint32_t*)resBuf) = htonl(resLength);
 
 	char *tmpbuf = (char*)resBuf;
@@ -440,7 +440,7 @@ bool HtsMessage::Serialize(uint32_t *length, void **buf)
 		it->second->Serialize(tmpbuf);
 		tmpbuf += it->second->calcSize();
 	}
-	
+
 	/*printf("Calculated total size %d\n", resLength + 4);
 	for(uint32_t i = 0; i < resLength; i++)
 	{
@@ -449,7 +449,7 @@ bool HtsMessage::Serialize(uint32_t *length, void **buf)
 			an = resBuf[i];
 		else
 			an = '-';
-		
+
 		printf("0x%X(%c) ", resBuf[i], an);
 	}
 	printf("\n");*/
@@ -480,16 +480,16 @@ void HtsMap::Serialize(void *buf)
 
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
-	
+
 	*((uint32_t*)(tmpbuf + 2)) = htonl(pCalcSize());
 	tmpbuf += 6;
-	
+
 	if(getName().length() > 0)
 	{
 		memcpy(tmpbuf, getName().c_str(), getName().length());
 		tmpbuf += getName().length();
 	}
-	
+
 	for(auto it = data.begin(); it != data.end(); ++it)
 	{
 		std::shared_ptr<HtsData> dat = it->second;
@@ -519,16 +519,16 @@ void HtsList::Serialize(void *buf)
 
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
-	
+
 	*((uint32_t*)(tmpbuf + 2)) = htonl(pCalcSize());
 	tmpbuf += 6;
-	
+
 	if(getName().length() > 0)
 	{
 		memcpy(tmpbuf, getName().c_str(), getName().length());
 		tmpbuf += getName().length();
 	}
-	
+
 	for(uint32_t i = 0; i < data.size(); i++)
 	{
 		std::shared_ptr<HtsData> d = data.at(i);
@@ -558,19 +558,19 @@ void HtsInt::Serialize(void *buf)
 {
 	uint32_t len = pCalcSize();
 	unsigned char *tmpbuf = (unsigned char*)buf;
-	
+
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
-	
+
 	*((uint32_t*)(tmpbuf + 2)) = htonl(len);
 	tmpbuf += 6;
-	
+
 	if(getName().length() > 0)
 	{
 		memcpy(tmpbuf, getName().c_str(), getName().length());
 		tmpbuf += getName().length();
 	}
-	
+
 	uint64_t u64 = data;
 	for(uint32_t i = 0; i < len; i++)
 	{
@@ -590,16 +590,16 @@ void HtsStr::Serialize(void *buf)
 
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
-	
+
 	*((uint32_t*)(tmpbuf + 2)) = htonl(data.length());
 	tmpbuf += 6;
-	
+
 	if(getName().length() > 0)
 	{
 		memcpy(tmpbuf, getName().c_str(), getName().length());
 		tmpbuf += getName().length();
 	}
-	
+
 	memcpy(tmpbuf, data.c_str(), data.length());
 }
 
@@ -614,15 +614,15 @@ void HtsBin::Serialize(void *buf)
 
 	tmpbuf[0] = getType();
 	tmpbuf[1] = getName().length();
-	
+
 	*((uint32_t*)(tmpbuf + 2)) = htonl(data_length);
 	tmpbuf += 6;
-	
+
 	if(getName().length() > 0)
 	{
 		memcpy(tmpbuf, getName().c_str(), getName().length());
 		tmpbuf += getName().length();
 	}
-	
+
 	memcpy(tmpbuf, data_buf, data_length);
 }

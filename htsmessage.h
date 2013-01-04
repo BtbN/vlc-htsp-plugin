@@ -46,7 +46,7 @@ class HtsData
 
 	virtual uint32_t calcSize() { printf("WARNING!\n"); return 0; }
 	virtual void Serialize(void *) { printf("WARNING!\n"); }
-	
+
 	virtual bool isMap() { return false; }
 	virtual bool isList() { return false; }
 	virtual bool isInt() { return false; }
@@ -55,10 +55,10 @@ class HtsData
 	virtual unsigned char getType() { return 0; }
 
 	virtual bool isValid() { return false; }
-	
+
 	std::string getName() const { return name; }
 	void setName(const std::string &newName) { name = newName; }
-	
+
 	private:
 	std::string name;
 };
@@ -89,7 +89,7 @@ class HtsMap : public HtsData
 
 	virtual uint32_t calcSize();
 	virtual void Serialize(void *buf);
-	
+
 	virtual bool isMap() { return true; }
 	virtual bool isValid() { return true; }
 	virtual unsigned char getType() { return 1; }

@@ -241,7 +241,7 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 			break;
 		if(m.getRoot().contains("seq") && m.getRoot().getU32("seq") == iSequence)
 			break;
-			
+
 		queue.push_back(m);
 		if(queue.size() >= MAX_QUEUE_SIZE)
 		{
@@ -329,11 +329,11 @@ bool ConnectHTSP(demux_t *demux)
 		hts_sha1_update(shactx, (const uint8_t *)(sys->password.c_str()), sys->password.length());
 		hts_sha1_update(shactx, (const uint8_t *)chall, chall_len);
 		hts_sha1_final(shactx, d);
-		
+
 		std::shared_ptr<HtsBin> bin = std::make_shared<HtsBin>();
 		bin->setBin(20, d);
 		map.setData("digest", bin);
-		
+
 		free(shactx);
 	}
 	else
