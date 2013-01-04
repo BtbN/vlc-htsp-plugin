@@ -27,6 +27,7 @@
 #include <vlc_network.h>
 #include <vlc_epg.h>
 #include <vlc_meta.h>
+#include <vlc_services_discovery.h>
 
 #include <ctime>
 #include <cerrno>
@@ -46,6 +47,10 @@ static void CloseHTSP(vlc_object_t *);
 static int DemuxHTSP(demux_t *demux);
 static int ControlHTSP(demux_t *access, int i_query, va_list args);
 
+static int OpenSD(vlc_object_t *);
+static void CloseSD(vlc_object_t *);
+VLC_SD_PROBE_HELPER( "htsp", "Tvheadend HTSP", SD_CAT_LAN )
+
 vlc_module_begin ()
 	set_shortname( "HTSP Protocol" )
 	set_description( "TVHeadend HTSP Protocol" )
@@ -54,6 +59,21 @@ vlc_module_begin ()
 	set_subcategory( SUBCAT_INPUT_ACCESS )
 	set_callbacks( OpenHTSP, CloseHTSP )
 	add_shortcut( "hts", "htsp" )
+
+	add_submodule()
+	set_shortname( "HTSP Protocol Discovery" )
+	set_description( "TVHeadend HTSP Protocol Discovery" )
+	set_category( CAT_PLAYLIST )
+	set_subcategory ( SUBCAT_PLAYLIST_SD )
+	add_integer_with_range( "htsp-port", 9982, 1, 65536, "HTSP Server Port", "The port of the HTSP server to connect to", false )
+	add_string( "htsp-host", "127.0.0.1", "HTSP Server Address", "The IP/Hostname of the HTSP server to connect to", false )
+	add_string( "htsp-user", "", "HTSP Username", "The username for authentication with HTSP Server", false )
+	add_string( "htsp-pass", "", "HTSP Password", "The password for authentication with HTSP Server", false )
+	set_capability ( "services_discovery", 0 )
+	set_callbacks ( OpenSD, CloseSD )
+	add_shortcut( "hts", "htsp" )
+
+	VLC_SD_PROBE_SUBMODULE
 vlc_module_end ()
 
 struct hts_stream
@@ -77,7 +97,7 @@ struct demux_sys_t
 		,pcrStream(0)
 		,lastPcr(0)
 		,ptsDelay(300000)
-		,netfd(0)
+		,netfd(-1)
 		,streamCount(0)
 		,stream(0)
 		,host("")
@@ -131,6 +151,29 @@ struct demux_sys_t
 	uint32_t drops;
 };
 
+struct tmp_channel
+{
+	std::string name;
+	uint32_t cid;
+	uint32_t cnum;
+	std::string url;
+	input_item_t *item;
+};
+
+struct services_discovery_sys_t
+{
+	services_discovery_sys_t()
+		:netfd(-1)
+		,nextSeqNum(1)
+	{}
+
+	int netfd;
+	uint32_t nextSeqNum;
+	std::deque<HtsMessage> queue;
+	vlc_thread_t thread;
+	std::unordered_map<uint32_t, tmp_channel> channelMap;
+};
+
 #define DEMUX_EOF 0
 #define DEMUX_OK 1
 #define DEMUX_ERROR -1
@@ -143,6 +186,14 @@ struct demux_sys_t
  ***************************************************/
 
 uint32_t HTSPNextSeqNum(demux_sys_t *sys)
+{
+	uint32_t res = sys->nextSeqNum++;
+	if(sys->nextSeqNum > 2147483647)
+		sys->nextSeqNum = 1;
+	return res;
+}
+
+uint32_t HTSPNextSeqNum(services_discovery_sys_t *sys)
 {
 	uint32_t res = sys->nextSeqNum++;
 	if(sys->nextSeqNum > 2147483647)
@@ -164,6 +215,27 @@ bool TransmitMessage(demux_t *demux, HtsMessage m)
 		return false;
 
 	if(net_Write(demux, sys->netfd, NULL, buf, len) != (ssize_t)len)
+		return false;
+
+	free(buf);
+
+	return true;
+}
+
+bool TransmitMessage(services_discovery_t *sd, HtsMessage m)
+{
+	services_discovery_sys_t *sys = sd->p_sys;
+
+	if(!sys || sys->netfd < 0)
+		return false;
+
+	void *buf;
+	uint32_t len;
+
+	if(!m.Serialize(&len, &buf))
+		return false;
+
+	if(net_Write(sd, sys->netfd, NULL, buf, len) != (ssize_t)len)
 		return false;
 
 	free(buf);
@@ -224,6 +296,59 @@ HtsMessage ReadMessage(demux_t *demux)
 	return HtsMessage::Deserialize(len, buf);
 }
 
+HtsMessage ReadMessage(services_discovery_t *sd)
+{
+	services_discovery_sys_t *sys = sd->p_sys;
+
+	char *buf;
+	uint32_t len;
+
+	if(sys->queue.size())
+	{
+		HtsMessage res = sys->queue.front();
+		sys->queue.pop_front();
+		return res;
+	}
+
+	if(net_Read(sd, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
+	{
+		msg_Err(sd, "Error reading from socket: %s", strerror(errno));
+		return HtsMessage();
+	}
+
+	len = ntohl(len);
+
+	if(len == 0)
+		return HtsMessage();
+
+	buf = (char*)malloc(len);
+
+	ssize_t read;
+	char *wbuf = buf;
+	ssize_t tlen = len;
+	time_t start = time(0);
+	while((read = net_Read(sd, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
+	{
+		wbuf += read;
+		tlen -= read;
+
+		if(difftime(start, time(0)) > READ_TIMEOUT)
+		{
+			msg_Err(sd, "Read timeout!");
+			free(buf);
+			return HtsMessage();
+		}
+	}
+	if(read > tlen)
+	{
+		msg_Dbg(sd, "WTF");
+		free(buf);
+		return HtsMessage();
+	}
+
+	return HtsMessage::Deserialize(len, buf);
+}
+
 HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -276,11 +401,73 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 	return m;
 }
 
+HtsMessage ReadResult(services_discovery_t *sd, HtsMessage m, bool sequence = true)
+{
+	services_discovery_sys_t *sys = sd->p_sys;
+
+	uint32_t iSequence = 0;
+	if(sequence)
+	{
+		iSequence = HTSPNextSeqNum(sys);
+		m.getRoot().setData("seq", iSequence);
+	}
+
+	if(!TransmitMessage(sd, m))
+		return HtsMessage();
+
+	std::deque<HtsMessage> queue;
+	sys->queue.swap(queue);
+
+	while((m = ReadMessage(sd)).isValid())
+	{
+		if(!sequence)
+			break;
+		if(m.getRoot().contains("seq") && m.getRoot().getU32("seq") == iSequence)
+			break;
+
+		queue.push_back(m);
+		if(queue.size() >= MAX_QUEUE_SIZE)
+		{
+			msg_Dbg(sd, "Max queue size reached!");
+			sys->queue.swap(queue);
+			return HtsMessage();
+		}
+	}
+
+	sys->queue.swap(queue);
+
+	if(!m.isValid())
+		return HtsMessage();
+
+	if(m.getRoot().contains("error"))
+	{
+		msg_Err(sd, "HTSP Error: %s", m.getRoot().getStr("error").c_str());
+		return HtsMessage();
+	}
+	if(m.getRoot().getU32("noaccess") != 0)
+	{
+		msg_Err(sd, "Access Denied");
+		return HtsMessage();
+	}
+
+	return m;
+}
+
 bool ReadSuccess(demux_t *demux, HtsMessage m, const std::string &action, bool sequence = true)
 {
 	if(!ReadResult(demux, m, sequence).isValid())
 	{
 		msg_Err(demux, "ReadSuccess - failed to %s", action.c_str());
+		return false;
+	}
+	return true;
+}
+
+bool ReadSuccess(services_discovery_t *sd, HtsMessage m, const std::string &action, bool sequence = true)
+{
+	if(!ReadResult(sd, m, sequence).isValid())
+	{
+		msg_Err(sd, "ReadSuccess - failed to %s", action.c_str());
 		return false;
 	}
 	return true;
@@ -354,124 +541,6 @@ bool ConnectHTSP(demux_t *demux)
 	else
 		msg_Err(demux, "Authentication failed!");
 	return res;
-}
-
-struct tmp_channel
-{
-	std::string name;
-	uint32_t cid;
-	std::string url;
-};
-
-bool compare_tmp_channel(tmp_channel first, tmp_channel second)
-{
-	if(first.cid < second.cid)
-		return true;
-	return false;
-}
-
-void PopulatePlaylist(demux_t *demux)
-{
-	demux_sys_t *sys = demux->p_sys;
-	playlist_t *pl = pl_Get(demux);
-
-	HtsMap map;
-	map.setData("method", "enableAsyncMetadata");
-	map.setData("epg", 1);
-	if(!ReadSuccess(demux, map.makeMsg(), "enable async metadata"))
-		return;
-
-	std::list<tmp_channel> channels;
-
-	std::unordered_map<uint32_t, vlc_meta_t*> metaData;
-	std::unordered_map<uint32_t, vlc_epg_t*> epgData;
-
-	HtsMessage m;
-	while((m = ReadMessage(demux)).isValid())
-	{
-		std::string method = m.getRoot().getStr("method");
-		if(method.empty() || method == "initialSyncCompleted")
-		{
-			msg_Info(demux, "Finished getting initial metadata sync");
-			break;
-		}
-
-		if(method == "channelAdd")
-		{
-			if(!m.getRoot().contains("channelId"))
-				continue;
-			uint32_t cid = m.getRoot().getU32("channelId");
-
-			std::string cname = m.getRoot().getStr("channelName");
-			if(cname.empty())
-				continue;
-
-			if(!m.getRoot().contains("channelNumber"))
-				continue;
-			uint32_t cnum = m.getRoot().getU32("channelNumber");
-
-			std::ostringstream oss;
-			oss << "htsp://";
-			if(!sys->username.empty() && !sys->password.empty())
-				oss << sys->username << ":" << sys->password << "@";
-			else if(!sys->username.empty())
-				oss << sys->username << "@";
-			oss << sys->host << ":" << sys->port << "/" << cid;
-
-			tmp_channel ch;
-			ch.name = cname;
-			ch.cid = cnum;
-			ch.url = oss.str();
-			channels.push_back(ch);
-
-			if(metaData.count(cid) < 1)
-				metaData[cid] = vlc_meta_New();
-
-			vlc_meta_SetTitle(metaData[cid], cname.c_str());
-		}
-		else if(method == "eventAdd")
-		{
-			if(!m.getRoot().contains("channelId"))
-				continue;
-			uint32_t cid = m.getRoot().getU32("channelId");
-
-			if(epgData.count(cid) < 1)
-				epgData[cid] = vlc_epg_New(0);
-
-			int64_t start = m.getRoot().getS64("start");
-			int64_t stop = m.getRoot().getS64("stop");
-			int duration = stop - start;
-
-			vlc_epg_AddEvent(epgData[cid], start, duration, m.getRoot().getStr("title").c_str(), m.getRoot().getStr("summary").c_str(), m.getRoot().getStr("description").c_str());
-
-			int64_t now = time(0);
-			if(now >= start && now < stop)
-				vlc_epg_SetCurrent(epgData[cid], start);
-		}
-	}
-
-	channels.sort(compare_tmp_channel);
-	playlist_Clear(pl, false);
-
-	for(auto it = metaData.begin(); it != metaData.end(); ++it)
-	{
-		es_out_Control(demux->out, ES_OUT_SET_GROUP_META, (int)it->first, it->second);
-		vlc_meta_Delete(it->second);
-	}
-
-	for(auto it = epgData.begin(); it != epgData.end(); ++it)
-	{
-		es_out_Control(demux->out, ES_OUT_SET_GROUP_EPG, (int)it->first, it->second);
-		vlc_epg_Delete(it->second);
-	}
-
-	while(channels.size() > 0)
-	{
-		tmp_channel ch = channels.front();
-		channels.pop_front();
-
-		playlist_Add(pl, ch.url.c_str(), ch.name.c_str(), PLAYLIST_INSERT, PLAYLIST_END, true, false);
-	}
 }
 
 void PopulateEPG(demux_t *demux)
@@ -596,8 +665,8 @@ static int OpenHTSP(vlc_object_t *obj)
 
 	if(sys->channelId == 0)
 	{
-		PopulatePlaylist(demux);
-		return VLC_SUCCESS;
+		msg_Err(demux, "HTSP ChannelID 0 is invalid!");
+		return VLC_EGENERIC;
 	}
 
 	PopulateEPG(demux);
@@ -622,6 +691,9 @@ static void CloseHTSP(vlc_object_t *obj)
 	if(!sys)
 		return;
 
+	if(sys->netfd >= 0)
+		net_Close(sys->netfd);
+		
 	delete sys;
 	sys = demux->p_sys = 0;
 }
@@ -655,7 +727,7 @@ static int ControlHTSP(demux_t *demux, int i_query, va_list args)
 bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
-	
+
 	if(sys->stream != 0)
 	{
 		for(uint32_t i = 0; i < sys->streamCount; i++)
@@ -668,14 +740,14 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 	if(msg.getRoot().contains("sourceinfo"))
 	{
 		std::shared_ptr<HtsMap> srcinfo = msg.getRoot().getMap("sourceinfo");
-		
+
 		vlc_meta_t *meta = vlc_meta_New();
 		vlc_meta_SetTitle(meta, srcinfo->getStr("service").c_str());
 		es_out_Control(demux->out, ES_OUT_SET_GROUP_META, (int)sys->channelId, meta);
 		vlc_meta_Delete(meta);
 		msg_Dbg(demux, "GOT SRC INFO: %s %s", srcinfo->getStr("adapter").c_str(), srcinfo->getStr("service").c_str());
 	}
-	
+
 	std::shared_ptr<HtsList> streams = msg.getRoot().getList("streams");
 	if(streams->count() <= 0)
 	{
@@ -1031,4 +1103,230 @@ static int DemuxHTSP(demux_t *demux)
 	}
 
 	return DEMUX_OK;
+}
+
+/***************************************************
+ ****       Services Discovery Functions        ****
+ ***************************************************/
+
+bool ConnectHTSP(services_discovery_t *sd)
+{
+	services_discovery_sys_t *sys = sd->p_sys;
+
+	const char *host = var_GetString(sd, "htsp-host");
+	int port = var_GetInteger(sd, "htsp-port");
+	
+	if(host == 0 || host[0] == 0 || sys->netfd >= 0)
+		return false;
+	
+	sys->netfd = net_ConnectTCP(sd, host, port);
+
+	if(sys->netfd < 0)
+		return false;
+
+	HtsMap map;
+	map.setData("method", "hello");
+	map.setData("clientname", "VLC media player");
+	map.setData("htspversion", 7);
+
+	HtsMessage m = ReadResult(sd, map.makeMsg());
+	if(!m.isValid())
+		return false;
+
+	uint32_t chall_len;
+	void * chall;
+	m.getRoot().getBin("challenge", &chall_len, &chall);
+
+	std::string serverName = m.getRoot().getStr("servername");
+	std::string serverVersion = m.getRoot().getStr("serverversion");
+	uint32_t protoVersion = m.getRoot().getU32("htspversion");
+
+	msg_Info(sd, "Connected to HTSP Server %s, version %s, protocol %d", serverName.c_str(), serverVersion.c_str(), protoVersion);
+
+	const char *user = var_GetString(sd, "htsp-user");
+	const char *pass = var_GetString(sd, "htsp-pass");
+	if(user == 0 || user[0] == 0)
+		return true;
+
+	map = HtsMap();
+	map.setData("method", "authenticate");
+	map.setData("username", user);
+
+	if(pass != 0 && pass[0] != 0 && chall)
+	{
+		msg_Info(sd, "Authenticating as '%s' with a password", user);
+
+		HTSSHA1 *shactx = (HTSSHA1*)malloc(hts_sha1_size);
+		uint8_t d[20];
+		hts_sha1_init(shactx);
+		hts_sha1_update(shactx, (const uint8_t *)pass, strlen(pass));
+		hts_sha1_update(shactx, (const uint8_t *)chall, chall_len);
+		hts_sha1_final(shactx, d);
+
+		std::shared_ptr<HtsBin> bin = std::make_shared<HtsBin>();
+		bin->setBin(20, d);
+		map.setData("digest", bin);
+
+		free(shactx);
+	}
+	else
+		msg_Info(sd, "Authenticating as '%s' without a password", user);
+
+	if(chall)
+		free(chall);
+
+	bool res = ReadSuccess(sd, map.makeMsg(), "authenticate");
+	if(res)
+		msg_Info(sd, "Successfully authenticated!");
+	else
+		msg_Err(sd, "Authentication failed!");
+	return res;
+}
+
+bool compare_tmp_channel(tmp_channel first, tmp_channel second)
+{
+	if(first.cnum < second.cnum)
+		return true;
+	return false;
+}
+
+bool GetChannels(services_discovery_t *sd)
+{
+	services_discovery_sys_t *sys = sd->p_sys;
+
+	HtsMap map;
+	map.setData("method", "enableAsyncMetadata");
+	if(!ReadSuccess(sd, map.makeMsg(), "enable async metadata"))
+		return false;
+
+	std::list<tmp_channel> channels;
+
+	HtsMessage m;
+	while((m = ReadMessage(sd)).isValid())
+	{
+		std::string method = m.getRoot().getStr("method");
+		if(method.empty() || method == "initialSyncCompleted")
+		{
+			msg_Info(sd, "Finished getting initial metadata sync");
+			break;
+		}
+
+		if(method == "channelAdd")
+		{
+			if(!m.getRoot().contains("channelId"))
+				continue;
+			uint32_t cid = m.getRoot().getU32("channelId");
+
+			std::string cname = m.getRoot().getStr("channelName");
+			if(cname.empty())
+				continue;
+
+			if(!m.getRoot().contains("channelNumber"))
+				continue;
+			uint32_t cnum = m.getRoot().getU32("channelNumber");
+
+			std::ostringstream oss;
+			oss << "htsp://";
+			
+			char *user = var_GetString(sd, "htsp-user");
+			char *pass = var_GetString(sd, "htsp-pass");
+			if(user != 0 && user[0] != 0 && pass != 0 && pass[0] != 0)
+				oss << user << ":" << pass << "@";
+			else if(user != 0 && user[0] != 0)
+				oss << user << "@";
+			
+			const char *host = var_GetString(sd, "htsp-host");
+			if(host == 0 || host[0] == 0)
+				host = "localhost";
+			oss << host << ":" << var_GetInteger(sd, "htsp-port") << "/" << cid;
+
+			tmp_channel ch;
+			ch.name = cname;
+			ch.cid = cid;
+			ch.cnum = cnum;
+			ch.url = oss.str();
+			channels.push_back(ch);
+		}
+	}
+
+	channels.sort(compare_tmp_channel);
+	
+	while(channels.size() > 0)
+	{
+		tmp_channel ch = channels.front();
+		channels.pop_front();
+
+		ch.item = input_item_New(ch.url.c_str(), ch.name.c_str());
+		if(unlikely(ch.item == 0))
+			return false;
+		
+		services_discovery_AddItem(sd, ch.item, "Channel");
+		
+		sys->channelMap[ch.cid] = ch;
+	}
+	
+	return true;
+}
+
+void * RunSD(void *obj)
+{
+	services_discovery_t *sd = (services_discovery_t *)obj;
+
+	GetChannels(sd);
+	
+	for(;;)
+	{
+		HtsMessage msg = ReadMessage(sd);
+		if(!msg.isValid())
+			return 0;
+
+		std::string method = msg.getRoot().getStr("method");
+		if(method.empty())
+			return 0;
+		
+		msg_Dbg(sd, "Got Message with method %s", method.c_str());
+	}
+
+	return 0;
+}
+
+static int OpenSD(vlc_object_t *obj)
+{
+	services_discovery_t *sd = (services_discovery_t *)obj;
+	services_discovery_sys_t *sys = new services_discovery_sys_t;
+	if(unlikely(sys == NULL))
+		return VLC_ENOMEM;
+	sd->p_sys = sys;
+
+	if(!ConnectHTSP(sd))
+	{
+		return VLC_EGENERIC;
+	}
+
+	if(vlc_clone(&sys->thread, RunSD, sd, VLC_THREAD_PRIORITY_LOW))
+	{
+		net_Close(sys->netfd);
+		delete sys;
+		return VLC_EGENERIC;
+	}
+	
+	return VLC_SUCCESS;
+}
+
+static void CloseSD(vlc_object_t *obj)
+{
+	services_discovery_t *sd = (services_discovery_t *)obj;
+	services_discovery_sys_t *sys = sd->p_sys;
+
+	if(!sys)
+		return;
+	
+	vlc_cancel(sys->thread);
+	vlc_join(sys->thread, 0);
+
+	if(sys->netfd >= 0)
+		net_Close(sys->netfd);
+	
+	delete sys;
+	sys = sd->p_sys = 0;
 }
