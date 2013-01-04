@@ -463,6 +463,11 @@ void PopulateEPG(demux_t *demux)
 		
 		vlc_epg_AddEvent(epg, start, duration, event->getStr("title").c_str(), event->getStr("summary").c_str(), event->getStr("description").c_str());
 		
+		msg_Dbg(demux, "Found new EPG Entry: start: %lld, stop: %lld, title: \"%s\"",
+			(long long int)start,
+			(long long int)stop,
+			event->getStr("title").c_str());
+		
 		int64_t now = time(0);
 		if(now >= start && now < stop)
 			vlc_epg_SetCurrent(epg, start);
