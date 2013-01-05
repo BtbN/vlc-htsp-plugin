@@ -25,7 +25,9 @@
 #include <vlc_network.h>
 #include <vlc_epg.h>
 #include <vlc_meta.h>
- 
+
+#include <ctime> 
+
 #include "access.h"
 #include "helper.h"
 #include "htsmessage.h"
