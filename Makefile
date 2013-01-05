@@ -54,7 +54,7 @@ win32:
 	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c helper.cpp
 	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c access.cpp
 	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c discovery.cpp
-	$(CXX) -shared -static-libgcc -static -o libhtsp_plugin.dll vlc-htsp-plugin.o htsmessage.o sha1.o win32/sdk/lib/libvlccore.dll.a -lws2_32 -lm
+	$(CXX) -shared -static-libgcc -static -o libhtsp_plugin.dll vlc-htsp-plugin.o access.o discovery.o helper.o htsmessage.o sha1.o win32/sdk/lib/libvlccore.dll.a -lws2_32 -lm
 	strip --strip-unneeded libhtsp_plugin.dll
 
 .PHONY: all install install-strip uninstall clean mostlyclean win32
