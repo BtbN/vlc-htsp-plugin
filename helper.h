@@ -38,7 +38,7 @@ struct sys_common_t
 		:netfd(-1)
 		,nextSeqNum(1)
 	{}
-	
+
 	virtual ~sys_common_t();
 
 	int netfd;

@@ -17,7 +17,7 @@
  *****************************************************************************/
 
 #define __STDC_CONSTANT_MACROS 1
- 
+
 #include <vlc_common.h>
 #include <vlc_network.h>
 

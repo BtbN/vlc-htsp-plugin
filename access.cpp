@@ -17,7 +17,7 @@
  *****************************************************************************/
 
 #define __STDC_CONSTANT_MACROS 1
- 
+
 #include <vlc_common.h>
 #include <vlc_demux.h>
 #include <vlc_access.h>
@@ -26,7 +26,7 @@
 #include <vlc_epg.h>
 #include <vlc_meta.h>
 
-#include <ctime> 
+#include <ctime>
 
 #include "access.h"
 #include "helper.h"
@@ -76,7 +76,7 @@ struct demux_sys_t : public sys_common_t
 			delete[] stream;
 
 		vlc_UrlClean(&url);
-		
+
 		if(epg)
 			vlc_epg_Delete(epg);
 	}
@@ -104,7 +104,7 @@ struct demux_sys_t : public sys_common_t
 	bool hadIFrame;
 
 	uint32_t drops;
-	
+
 	vlc_epg_t *epg;
 };
 
@@ -197,7 +197,7 @@ void PopulateEPG(demux_t *demux)
 		return;
 
 	sys->epg = vlc_epg_New(0);
-	
+
 	std::shared_ptr<HtsList> events = res.getRoot().getList("events");
 	for(uint32_t i = 0; i < events->count(); i++)
 	{
@@ -381,7 +381,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 		vlc_meta_SetTitle(meta, srcinfo->getStr("service").c_str());
 		es_out_Control(demux->out, ES_OUT_SET_GROUP_META, (int)sys->channelId, meta);
 		vlc_meta_Delete(meta);
-		
+
 		es_out_Control(demux->out, ES_OUT_SET_GROUP_EPG, (int)sys->channelId, sys->epg);
 		vlc_epg_Delete(sys->epg);
 		sys->epg = 0;

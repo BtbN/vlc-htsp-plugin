@@ -26,7 +26,7 @@
 #include <unordered_map>
 #include <sstream>
 
-#include "discovery.h" 
+#include "discovery.h"
 #include "helper.h"
 #include "htsmessage.h"
 #include "sha1.h"
@@ -230,7 +230,7 @@ void * RunSD(void *obj)
 		msg_Err(sd, "Connecting to HTS Failed!");
 		return 0;
 	}
-	
+
 	GetChannels(sd);
 
 	for(;;)
