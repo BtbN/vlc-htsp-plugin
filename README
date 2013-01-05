@@ -1,1 +1,7 @@
-Work in progress
+Compile using make and put resulting libhtsp_plugin.so somewhere VLC finds it.
+
+Some settings are available for the service discovery. Filter advanced settings for HTS to easily find them.
+
+URL format is htsp://{username{:password}@}server{:port}/channelId
+
+The Service Discovery module is listed under LAN and grabs the channel list from TVH.
