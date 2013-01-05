@@ -18,7 +18,7 @@ override LDFLAGS += $(VLC_PLUGIN_LIBS)
 
 TARGETS = libhtsp_plugin.so
 C_SOURCES = sha1.c
-CXX_SOURCES = vlc-htsp-plugin.cpp htsmessage.cpp
+CXX_SOURCES = vlc-htsp-plugin.cpp htsmessage.cpp helper.cpp access.cpp discovery.cpp
 
 all: libhtsp_plugin.so
 
@@ -51,6 +51,9 @@ win32:
 	$(CC) -pipe -O2 -std=gnu99 -I. -c sha1.c
 	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c vlc-htsp-plugin.cpp
 	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c htsmessage.cpp
+	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c helper.cpp
+	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c access.cpp
+	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c discovery.cpp
 	$(CXX) -shared -static-libgcc -static -o libhtsp_plugin.dll vlc-htsp-plugin.o htsmessage.o sha1.o win32/sdk/lib/libvlccore.dll.a -lws2_32 -lm
 	strip --strip-unneeded libhtsp_plugin.dll
 
