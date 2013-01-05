@@ -87,6 +87,25 @@ static const char *const cfg_options[] =
 	NULL
 };
 
+
+struct sys_common_t
+{
+	sys_common_t()
+		:netfd(-1)
+		,nextSeqNum(1)
+	{}
+	
+	virtual ~sys_common_t()
+	{
+		if(netfd >= 0)
+			net_Close(netfd);
+	}
+
+	int netfd;
+	uint32_t nextSeqNum;
+	std::deque<HtsMessage> queue;
+};
+
 struct hts_stream
 {
 	hts_stream()
@@ -101,14 +120,13 @@ struct hts_stream
 	mtime_t lastPts;
 };
 
-struct demux_sys_t
+struct demux_sys_t : public sys_common_t
 {
 	demux_sys_t()
 		:start(0)
 		,pcrStream(0)
 		,lastPcr(0)
 		,ptsDelay(300000)
-		,netfd(-1)
 		,streamCount(0)
 		,stream(0)
 		,host("")
@@ -116,9 +134,9 @@ struct demux_sys_t
 		,username("")
 		,password("")
 		,channelId(0)
-		,nextSeqNum(1)
 		,hadIFrame(false)
 		,drops(0)
+		,epg(0)
 	{}
 
 	~demux_sys_t()
@@ -126,18 +144,16 @@ struct demux_sys_t
 		if(stream)
 			delete[] stream;
 
-		if(netfd >= 0)
-			net_Close(netfd);
-
 		vlc_UrlClean(&url);
+		
+		if(epg)
+			vlc_epg_Delete(epg);
 	}
 
 	mtime_t start;
 	uint32_t pcrStream;
 	mtime_t lastPcr;
 	mtime_t ptsDelay;
-
-	int netfd;
 
 	uint32_t streamCount;
 	hts_stream *stream;
@@ -154,12 +170,11 @@ struct demux_sys_t
 	std::string serverVersion;
 	int32_t protoVersion;
 
-	uint32_t nextSeqNum;
-	std::deque<HtsMessage> queue;
-
 	bool hadIFrame;
 
 	uint32_t drops;
+	
+	vlc_epg_t *epg;
 };
 
 struct tmp_channel
@@ -171,16 +186,11 @@ struct tmp_channel
 	input_item_t *item;
 };
 
-struct services_discovery_sys_t
+struct services_discovery_sys_t : public sys_common_t
 {
 	services_discovery_sys_t()
-		:netfd(-1)
-		,nextSeqNum(1)
 	{}
 
-	int netfd;
-	uint32_t nextSeqNum;
-	std::deque<HtsMessage> queue;
 	vlc_thread_t thread;
 	std::unordered_map<uint32_t, tmp_channel> channelMap;
 };
@@ -196,7 +206,7 @@ struct services_discovery_sys_t
  ****       HTS Protocol Helper Functions       ****
  ***************************************************/
 
-uint32_t HTSPNextSeqNum(demux_sys_t *sys)
+uint32_t HTSPNextSeqNum(sys_common_t *sys)
 {
 	uint32_t res = sys->nextSeqNum++;
 	if(sys->nextSeqNum > 2147483647)
@@ -204,60 +214,36 @@ uint32_t HTSPNextSeqNum(demux_sys_t *sys)
 	return res;
 }
 
-uint32_t HTSPNextSeqNum(services_discovery_sys_t *sys)
+bool TransmitMessageEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m)
 {
-	uint32_t res = sys->nextSeqNum++;
-	if(sys->nextSeqNum > 2147483647)
-		sys->nextSeqNum = 1;
-	return res;
-}
-
-bool TransmitMessage(demux_t *demux, HtsMessage m)
-{
-	demux_sys_t *sys = demux->p_sys;
-
-	if(!sys || sys->netfd < 0)
+	if(sys->netfd < 0)
+	{
+		msg_Dbg(obj, "Invalid netfd in TransmitMessage");
 		return false;
+	}
 
 	void *buf;
 	uint32_t len;
 
 	if(!m.Serialize(&len, &buf))
+	{
+		msg_Dbg(obj, "Serialising message failed");
 		return false;
+	}
 
-	if(net_Write(demux, sys->netfd, NULL, buf, len) != (ssize_t)len)
+	if(net_Write(obj, sys->netfd, NULL, buf, len) != (ssize_t)len)
+	{
+		msg_Dbg(obj, "net_Write failed");
 		return false;
+	}
 
 	free(buf);
 
 	return true;
 }
 
-bool TransmitMessage(services_discovery_t *sd, HtsMessage m)
+HtsMessage ReadMessageEx(vlc_object_t *obj, sys_common_t *sys)
 {
-	services_discovery_sys_t *sys = sd->p_sys;
-
-	if(!sys || sys->netfd < 0)
-		return false;
-
-	void *buf;
-	uint32_t len;
-
-	if(!m.Serialize(&len, &buf))
-		return false;
-
-	if(net_Write(sd, sys->netfd, NULL, buf, len) != (ssize_t)len)
-		return false;
-
-	free(buf);
-
-	return true;
-}
-
-HtsMessage ReadMessage(demux_t *demux)
-{
-	demux_sys_t *sys = demux->p_sys;
-
 	char *buf;
 	uint32_t len;
 
@@ -268,9 +254,9 @@ HtsMessage ReadMessage(demux_t *demux)
 		return res;
 	}
 
-	if(net_Read(demux, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
+	if(net_Read(obj, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
 	{
-		msg_Err(demux, "Error reading from socket: %s", strerror(errno));
+		msg_Err(obj, "Error reading from socket: %s", strerror(errno));
 		return HtsMessage();
 	}
 
@@ -285,85 +271,32 @@ HtsMessage ReadMessage(demux_t *demux)
 	char *wbuf = buf;
 	ssize_t tlen = len;
 	time_t start = time(0);
-	while((read = net_Read(demux, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
+	while((read = net_Read(obj, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
 	{
 		wbuf += read;
 		tlen -= read;
 
 		if(difftime(start, time(0)) > READ_TIMEOUT)
 		{
-			msg_Err(demux, "Read timeout!");
+			msg_Err(obj, "Read timeout!");
 			free(buf);
 			return HtsMessage();
 		}
 	}
 	if(read > tlen)
 	{
-		msg_Dbg(demux, "WTF");
+		msg_Dbg(obj, "WTF");
 		free(buf);
 		return HtsMessage();
 	}
 
-	return HtsMessage::Deserialize(len, buf);
+	HtsMessage result = HtsMessage::Deserialize(len, buf);
+	free(buf);
+	return result;
 }
 
-HtsMessage ReadMessage(services_discovery_t *sd)
+HtsMessage ReadResultEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m, bool sequence = true)
 {
-	services_discovery_sys_t *sys = sd->p_sys;
-
-	char *buf;
-	uint32_t len;
-
-	if(sys->queue.size())
-	{
-		HtsMessage res = sys->queue.front();
-		sys->queue.pop_front();
-		return res;
-	}
-
-	if(net_Read(sd, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
-	{
-		msg_Err(sd, "Error reading from socket: %s", strerror(errno));
-		return HtsMessage();
-	}
-
-	len = ntohl(len);
-
-	if(len == 0)
-		return HtsMessage();
-
-	buf = (char*)malloc(len);
-
-	ssize_t read;
-	char *wbuf = buf;
-	ssize_t tlen = len;
-	time_t start = time(0);
-	while((read = net_Read(sd, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
-	{
-		wbuf += read;
-		tlen -= read;
-
-		if(difftime(start, time(0)) > READ_TIMEOUT)
-		{
-			msg_Err(sd, "Read timeout!");
-			free(buf);
-			return HtsMessage();
-		}
-	}
-	if(read > tlen)
-	{
-		msg_Dbg(sd, "WTF");
-		free(buf);
-		return HtsMessage();
-	}
-
-	return HtsMessage::Deserialize(len, buf);
-}
-
-HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
-{
-	demux_sys_t *sys = demux->p_sys;
-
 	uint32_t iSequence = 0;
 	if(sequence)
 	{
@@ -371,13 +304,16 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 		m.getRoot().setData("seq", iSequence);
 	}
 
-	if(!TransmitMessage(demux, m))
+	if(!TransmitMessageEx(obj, sys, m))
+	{
+		msg_Err(obj, "TransmitMessage failed!");
 		return HtsMessage();
+	}
 
 	std::deque<HtsMessage> queue;
 	sys->queue.swap(queue);
 
-	while((m = ReadMessage(demux)).isValid())
+	while((m = ReadMessageEx(obj, sys)).isValid())
 	{
 		if(!sequence)
 			break;
@@ -387,7 +323,7 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 		queue.push_back(m);
 		if(queue.size() >= MAX_QUEUE_SIZE)
 		{
-			msg_Dbg(demux, "Max queue size reached!");
+			msg_Err(obj, "Max queue size reached!");
 			sys->queue.swap(queue);
 			return HtsMessage();
 		}
@@ -396,93 +332,40 @@ HtsMessage ReadResult(demux_t *demux, HtsMessage m, bool sequence = true)
 	sys->queue.swap(queue);
 
 	if(!m.isValid())
+	{
+		msg_Err(obj, "ReadMessage failed!");
 		return HtsMessage();
+	}
 
 	if(m.getRoot().contains("error"))
 	{
-		msg_Err(demux, "HTSP Error: %s", m.getRoot().getStr("error").c_str());
+		msg_Err(obj, "HTSP Error: %s", m.getRoot().getStr("error").c_str());
 		return HtsMessage();
 	}
 	if(m.getRoot().getU32("noaccess") != 0)
 	{
-		msg_Err(demux, "Access Denied");
+		msg_Err(obj, "Access Denied");
 		return HtsMessage();
 	}
 
 	return m;
 }
 
-HtsMessage ReadResult(services_discovery_t *sd, HtsMessage m, bool sequence = true)
+bool ReadSuccessEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m, const std::string &action, bool sequence = true)
 {
-	services_discovery_sys_t *sys = sd->p_sys;
-
-	uint32_t iSequence = 0;
-	if(sequence)
+	if(!ReadResultEx(obj, sys, m, sequence).isValid())
 	{
-		iSequence = HTSPNextSeqNum(sys);
-		m.getRoot().setData("seq", iSequence);
-	}
-
-	if(!TransmitMessage(sd, m))
-		return HtsMessage();
-
-	std::deque<HtsMessage> queue;
-	sys->queue.swap(queue);
-
-	while((m = ReadMessage(sd)).isValid())
-	{
-		if(!sequence)
-			break;
-		if(m.getRoot().contains("seq") && m.getRoot().getU32("seq") == iSequence)
-			break;
-
-		queue.push_back(m);
-		if(queue.size() >= MAX_QUEUE_SIZE)
-		{
-			msg_Dbg(sd, "Max queue size reached!");
-			sys->queue.swap(queue);
-			return HtsMessage();
-		}
-	}
-
-	sys->queue.swap(queue);
-
-	if(!m.isValid())
-		return HtsMessage();
-
-	if(m.getRoot().contains("error"))
-	{
-		msg_Err(sd, "HTSP Error: %s", m.getRoot().getStr("error").c_str());
-		return HtsMessage();
-	}
-	if(m.getRoot().getU32("noaccess") != 0)
-	{
-		msg_Err(sd, "Access Denied");
-		return HtsMessage();
-	}
-
-	return m;
-}
-
-bool ReadSuccess(demux_t *demux, HtsMessage m, const std::string &action, bool sequence = true)
-{
-	if(!ReadResult(demux, m, sequence).isValid())
-	{
-		msg_Err(demux, "ReadSuccess - failed to %s", action.c_str());
+		msg_Err(obj, "ReadSuccess - failed to %s", action.c_str());
 		return false;
 	}
 	return true;
 }
 
-bool ReadSuccess(services_discovery_t *sd, HtsMessage m, const std::string &action, bool sequence = true)
-{
-	if(!ReadResult(sd, m, sequence).isValid())
-	{
-		msg_Err(sd, "ReadSuccess - failed to %s", action.c_str());
-		return false;
-	}
-	return true;
-}
+
+#define TransmitMessage(a, b, c) TransmitMessageEx(VLC_OBJECT(a), b, c)
+#define ReadMessage(a, b) ReadMessageEx(VLC_OBJECT(a), b)
+#define ReadResult(a, b, c) ReadResultEx(VLC_OBJECT(a), b, c)
+#define ReadSuccess(a, b, c, d) ReadSuccessEx(VLC_OBJECT(a), b, c, d)
 
 /***************************************************
  ****       Initialization Functions            ****
@@ -495,16 +378,22 @@ bool ConnectHTSP(demux_t *demux)
 	sys->netfd = net_ConnectTCP(demux, sys->host.c_str(), sys->port);
 
 	if(sys->netfd < 0)
+	{
+		msg_Err(demux, "net_ConnectTCP failed!");
 		return false;
+	}
 
 	HtsMap map;
 	map.setData("method", "hello");
 	map.setData("clientname", "VLC media player");
-	map.setData("htspversion", 7);
+	map.setData("htspversion", 8);
 
-	HtsMessage m = ReadResult(demux, map.makeMsg());
+	HtsMessage m = ReadResult(demux, sys, map.makeMsg());
 	if(!m.isValid())
+	{
+		msg_Err(demux, "ReadResult failed!");
 		return false;
+	}
 
 	uint32_t chall_len;
 	void * chall;
@@ -546,7 +435,7 @@ bool ConnectHTSP(demux_t *demux)
 	if(chall)
 		free(chall);
 
-	bool res = ReadSuccess(demux, map.makeMsg(), "authenticate");
+	bool res = ReadSuccess(demux, sys, map.makeMsg(), "authenticate");
 	if(res)
 		msg_Info(demux, "Successfully authenticated!");
 	else
@@ -562,12 +451,12 @@ void PopulateEPG(demux_t *demux)
 	map.setData("method", "getEvents");
 	map.setData("channelId", sys->channelId);
 
-	HtsMessage res = ReadResult(demux, map.makeMsg());
+	HtsMessage res = ReadResult(demux, sys, map.makeMsg());
 	if(!res.isValid())
 		return;
 
-	vlc_epg_t *epg = vlc_epg_New(0);
-
+	sys->epg = vlc_epg_New(0);
+	
 	std::shared_ptr<HtsList> events = res.getRoot().getList("events");
 	for(uint32_t i = 0; i < events->count(); i++)
 	{
@@ -583,14 +472,12 @@ void PopulateEPG(demux_t *demux)
 		int64_t stop = event->getS64("stop");
 		int duration = stop - start;
 
-		vlc_epg_AddEvent(epg, start, duration, event->getStr("title").c_str(), event->getStr("summary").c_str(), event->getStr("description").c_str());
+		vlc_epg_AddEvent(sys->epg, start, duration, event->getStr("title").c_str(), event->getStr("summary").c_str(), event->getStr("description").c_str());
 
 		int64_t now = time(0);
 		if(now >= start && now < stop)
-			vlc_epg_SetCurrent(epg, start);
+			vlc_epg_SetCurrent(sys->epg, start);
 	}
-	es_out_Control(demux->out, ES_OUT_SET_GROUP_EPG, (int)sys->channelId, epg);
-	vlc_epg_Delete(epg);
 }
 
 bool SubscribeHTSP(demux_t *demux)
@@ -606,7 +493,7 @@ bool SubscribeHTSP(demux_t *demux)
 	//map.setData("90khz", std::make_shared<HtsInt>(1));
 	//map.setData("normts", std::make_shared<HtsInt>(1));
 
-	bool res = ReadSuccess(demux, map.makeMsg(), "subscribe to channel");
+	bool res = ReadSuccess(demux, sys, map.makeMsg(), "subscribe to channel");
 	if(res)
 		msg_Info(demux, "Successfully subscribed to channel %d", sys->channelId);
 	return res;
@@ -702,9 +589,6 @@ static void CloseHTSP(vlc_object_t *obj)
 	if(!sys)
 		return;
 
-	if(sys->netfd >= 0)
-		net_Close(sys->netfd);
-
 	delete sys;
 	sys = demux->p_sys = 0;
 }
@@ -748,7 +632,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 		sys->streamCount = 0;
 	}
 
-	if(msg.getRoot().contains("sourceinfo"))
+	if(msg.getRoot().contains("sourceinfo") && sys->epg != 0)
 	{
 		std::shared_ptr<HtsMap> srcinfo = msg.getRoot().getMap("sourceinfo");
 
@@ -756,7 +640,10 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 		vlc_meta_SetTitle(meta, srcinfo->getStr("service").c_str());
 		es_out_Control(demux->out, ES_OUT_SET_GROUP_META, (int)sys->channelId, meta);
 		vlc_meta_Delete(meta);
-		msg_Dbg(demux, "GOT SRC INFO: %s %s", srcinfo->getStr("adapter").c_str(), srcinfo->getStr("service").c_str());
+		
+		es_out_Control(demux->out, ES_OUT_SET_GROUP_EPG, (int)sys->channelId, sys->epg);
+		vlc_epg_Delete(sys->epg);
+		sys->epg = 0;
 	}
 
 	std::shared_ptr<HtsList> streams = msg.getRoot().getList("streams");
@@ -1054,7 +941,7 @@ static int DemuxHTSP(demux_t *demux)
 	if(sys->channelId == 0)
 		return DEMUX_EOF;
 
-	HtsMessage msg = ReadMessage(demux);
+	HtsMessage msg = ReadMessage(demux, sys);
 	if(!msg.isValid())
 		return DEMUX_EOF;
 
@@ -1144,9 +1031,9 @@ bool ConnectHTSP(services_discovery_t *sd)
 	HtsMap map;
 	map.setData("method", "hello");
 	map.setData("clientname", "VLC media player");
-	map.setData("htspversion", 7);
+	map.setData("htspversion", 8);
 
-	HtsMessage m = ReadResult(sd, map.makeMsg());
+	HtsMessage m = ReadResult(sd, sys, map.makeMsg());
 	if(!m.isValid())
 	{
 		msg_Err(sd, "No valid hello response");
@@ -1195,7 +1082,7 @@ bool ConnectHTSP(services_discovery_t *sd)
 	if(chall)
 		free(chall);
 
-	bool res = ReadSuccess(sd, map.makeMsg(), "authenticate");
+	bool res = ReadSuccess(sd, sys, map.makeMsg(), "authenticate");
 	if(res)
 		msg_Info(sd, "Successfully authenticated!");
 	else
@@ -1216,13 +1103,13 @@ bool GetChannels(services_discovery_t *sd)
 
 	HtsMap map;
 	map.setData("method", "enableAsyncMetadata");
-	if(!ReadSuccess(sd, map.makeMsg(), "enable async metadata"))
+	if(!ReadSuccess(sd, sys, map.makeMsg(), "enable async metadata"))
 		return false;
 
 	std::list<tmp_channel> channels;
 
 	HtsMessage m;
-	while((m = ReadMessage(sd)).isValid())
+	while((m = ReadMessage(sd, sys)).isValid())
 	{
 		std::string method = m.getRoot().getStr("method");
 		if(method.empty() || method == "initialSyncCompleted")
@@ -1294,12 +1181,13 @@ bool GetChannels(services_discovery_t *sd)
 void * RunSD(void *obj)
 {
 	services_discovery_t *sd = (services_discovery_t *)obj;
+	services_discovery_sys_t *sys = sd->p_sys;
 
 	GetChannels(sd);
 
 	for(;;)
 	{
-		HtsMessage msg = ReadMessage(sd);
+		HtsMessage msg = ReadMessage(sd, sys);
 		if(!msg.isValid())
 			return 0;
 
@@ -1331,7 +1219,6 @@ static int OpenSD(vlc_object_t *obj)
 
 	if(vlc_clone(&sys->thread, RunSD, sd, VLC_THREAD_PRIORITY_LOW))
 	{
-		net_Close(sys->netfd);
 		delete sys;
 		return VLC_EGENERIC;
 	}
@@ -1349,9 +1236,6 @@ static void CloseSD(vlc_object_t *obj)
 
 	vlc_cancel(sys->thread);
 	vlc_join(sys->thread, 0);
-
-	if(sys->netfd >= 0)
-		net_Close(sys->netfd);
 
 	delete sys;
 	sys = sd->p_sys = 0;
