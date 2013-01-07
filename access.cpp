@@ -55,7 +55,6 @@ struct demux_sys_t : public sys_common_t
 {
 	demux_sys_t()
 		:start(0)
-		,pcrStream(0)
 		,lastPcr(0)
 		,ptsDelay(300000)
 		,streamCount(0)
@@ -82,7 +81,6 @@ struct demux_sys_t : public sys_common_t
 	}
 
 	mtime_t start;
-	uint32_t pcrStream;
 	mtime_t lastPcr;
 	mtime_t ptsDelay;
 
@@ -399,7 +397,6 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
 	sys->stream = new hts_stream[sys->streamCount];
 	sys->hadIFrame = false;
-	sys->pcrStream = 0;
 	sys->lastPcr = 0;
 
 	for(uint32_t jj = 0; jj < streams->count(); jj++)
@@ -468,9 +465,6 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
 		if(fmt->i_cat == VIDEO_ES)
 		{
-			if(sys->pcrStream == 0)
-				sys->pcrStream = index;
-
 			fmt->video.i_width = map->getU32("width");
 			fmt->video.i_height = map->getU32("height");
 		}
@@ -494,13 +488,6 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
 		msg_Dbg(demux, "Found elementary stream id %d, type %s", index, type.c_str());
 	}
-
-	if(sys->pcrStream == 0)
-		for(uint32_t i = 0; i < sys->streamCount; i++)
-			if(sys->stream[i].fmt.i_cat == AUDIO_ES)
-				sys->pcrStream = i+1;
-	if(sys->pcrStream == 0)
-		sys->pcrStream = 1;
 
 	return true;
 }
@@ -651,16 +638,11 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	}
 
 	mtime_t pcr = 0;
-	mtime_t bpcr = 0;
 	for(uint32_t i = 0; i < sys->streamCount; i++)
 	{
 		if(sys->stream[i].lastDts > 0 && (sys->stream[i].lastDts < pcr || pcr == 0))
 		{
 			pcr = sys->stream[i].lastDts;
-		}
-		if(sys->stream[i].lastPts > 0 && (sys->stream[i].lastDts > bpcr || bpcr == 0))
-		{
-			bpcr = sys->stream[i].lastDts;
 		}
 	}
 
