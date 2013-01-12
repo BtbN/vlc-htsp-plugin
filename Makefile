@@ -3,6 +3,7 @@ LD = ld
 CC = gcc
 CXX = g++
 INSTALL = install
+STRIP = strip
 CFLAGS = -pipe -O2 -Wall -Wextra -std=gnu99 -DPIC -fPIC -I.
 CXXFLAGS = -pipe -O2 -Wall -Wextra -std=gnu++0x -DPIC -fPIC -I.
 LDFLAGS = -Wl,-no-undefined,-z,defs
@@ -45,7 +46,7 @@ mostlyclean: clean
 
 libhtsp_plugin.so: $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o)
 	$(CXX) -shared -o $@ $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o) $(LDFLAGS)
-	strip --strip-unneeded $@
+	$(STRIP) --strip-unneeded $@
 
 win32:
 	$(CC) -pipe -O2 -std=gnu99 -I. -c sha1.c
@@ -55,7 +56,7 @@ win32:
 	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c access.cpp
 	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -DMODULE_STRING=\"htsp\" -I. -Iwin32/sdk/include/vlc/plugins -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c discovery.cpp
 	$(CXX) -shared -static-libgcc -static -o libhtsp_plugin.dll vlc-htsp-plugin.o access.o discovery.o helper.o htsmessage.o sha1.o win32/sdk/lib/libvlccore.dll.a -lws2_32 -lm
-	strip --strip-unneeded libhtsp_plugin.dll
+	$(STRIP) --strip-unneeded libhtsp_plugin.dll
 
 .PHONY: all install install-strip uninstall clean mostlyclean win32
 
