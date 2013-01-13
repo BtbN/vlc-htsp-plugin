@@ -57,7 +57,8 @@ struct demux_sys_t : public sys_common_t
 		:start(0)
 		,lastPcr(0)
 		,ptsDelay(300000)
-		,currentPts(0)
+		,currentPcr(0)
+		,tsOffset(0)
 		,timeshiftPeriod(0)
 		,streamCount(0)
 		,stream(0)
@@ -85,10 +86,11 @@ struct demux_sys_t : public sys_common_t
 	mtime_t start;
 	mtime_t lastPcr;
 	mtime_t ptsDelay;
-	mtime_t currentPts;
+	mtime_t currentPcr;
+	mtime_t tsOffset;
 
 	uint32_t timeshiftPeriod;
-	
+
 	uint32_t streamCount;
 	hts_stream *stream;
 
@@ -112,6 +114,7 @@ struct demux_sys_t : public sys_common_t
 };
 
 int PauseHTSP(demux_t *demux, bool state);
+int SeekHTSP(demux_t *demux, int64_t time, bool precise);
 
 /***************************************************
  ****       Initialization Functions            ****
@@ -349,23 +352,53 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 {
 	demux_sys_t *sys = demux->p_sys;
 
+	bool tb = false;
+	int64_t ti = 0;
+	double td = 0.0d;
+
 	switch(i_query)
 	{
 		case DEMUX_CAN_PAUSE:
+		case DEMUX_CAN_SEEK:
 			*va_arg(args, bool*) = (sys->timeshiftPeriod > 0);
 			return VLC_SUCCESS;
-		case DEMUX_CAN_SEEK:
 		case DEMUX_CAN_CONTROL_PACE:
 			*va_arg(args, bool*) = false;
 			return VLC_SUCCESS;
+		case DEMUX_SET_PAUSE_STATE:
+			msg_Dbg(demux, "SET_PAUSE_STATE Queried");
+			tb = (bool)va_arg(args, int);
+			return PauseHTSP(demux, tb);
+		case DEMUX_SET_TIME:
+			msg_Dbg(demux, "SET_TIME Queried");
+			ti = va_arg(args, int64_t);
+			tb = (bool)va_arg(args, int);
+			return SeekHTSP(demux, ti, tb);
+		case DEMUX_GET_LENGTH:
+			if(sys->currentPcr == 0)
+				return VLC_EGENERIC;
+			*va_arg(args, int64_t*) = sys->currentPcr + sys->tsOffset;
+			return VLC_SUCCESS;
+		case DEMUX_GET_POSITION:
+			if(sys->currentPcr == 0)
+				return VLC_EGENERIC;
+			td = sys->currentPcr + sys->tsOffset;
+			td = sys->currentPcr / td;
+			*va_arg(args, double*) = td;
+			return VLC_SUCCESS;
+		case DEMUX_SET_POSITION:
+			msg_Dbg(demux, "SET_POSITION Queried");
+			td = va_arg(args, double);
+			tb = (bool)va_arg(args, int);
+			return SeekHTSP(demux, td * (sys->currentPcr + sys->tsOffset), tb);
 		case DEMUX_GET_PTS_DELAY:
 			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching") + sys->ptsDelay;
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
-			*va_arg(args, int64_t*) = sys->currentPts;
+			if(sys->currentPcr == 0)
+				return VLC_EGENERIC;
+			*va_arg(args, int64_t*) = sys->currentPcr;
 			return VLC_SUCCESS;
-		case DEMUX_SET_PAUSE_STATE:
-			return PauseHTSP(demux, (bool)va_arg(args, int));
 		default:
 			return VLC_EGENERIC;
 	}
@@ -375,25 +408,47 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
  ****       Actual Demuxing Work Functions      ****
  ***************************************************/
 
+int SeekHTSP(demux_t *demux, int64_t time, bool precise)
+{
+	VLC_UNUSED(precise);
+
+	demux_sys_t *sys = demux->p_sys;
+
+	HtsMap map;
+	map.setData("method", "subscriptionSeek");
+	map.setData("subscriptionId", 1);
+	map.setData("time", time);
+	map.setData("absolute", 1);
+
+	if(!ReadSuccess(demux, sys, map.makeMsg(), "seek"))
+		return VLC_EGENERIC;
+
+	sys->lastPcr = 0;
+	sys->currentPcr = 0;
+	sys->tsOffset = 0;
+
+	return VLC_SUCCESS;
+}
+
 int PauseHTSP(demux_t *demux, bool state)
 {
 	demux_sys_t *sys = demux->p_sys;
 	if(sys->timeshiftPeriod == 0)
 		return VLC_EGENERIC;
-	
+
 	HtsMap map;
 	map.setData("method", "subscriptionSpeed");
 	map.setData("subscriptionId", 1);
 	map.setData("speed", state?0:100);
-	
+
 	msg_Dbg(demux, "Set HTSP Speed to %d", state?0:100);
-	
+
 	if(ReadSuccess(demux, sys, map.makeMsg(), "set speed"))
 		return VLC_SUCCESS;
-	
+
 	return VLC_EGENERIC;
 }
- 
+
 bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -434,7 +489,8 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 	sys->stream = new hts_stream[sys->streamCount];
 	sys->hadIFrame = false;
 	sys->lastPcr = 0;
-	sys->currentPts = 0;
+	sys->currentPcr = 0;
+	sys->tsOffset = 0;
 
 	for(uint32_t jj = 0; jj < streams->count(); jj++)
 	{
@@ -588,6 +644,8 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 
 	uint32_t index = msg.getRoot().getU32("stream");
 
+	sys->tsOffset = msg.getRoot().getS64("timeshift");
+
 	void *bin = 0;
 	uint32_t binlen = 0;
 	msg.getRoot().getBin("payload", &binlen, &bin);
@@ -675,22 +733,17 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	}
 
 	mtime_t pcr = 0;
-	mtime_t cPts = 0;
 	for(uint32_t i = 0; i < sys->streamCount; i++)
 	{
 		if(sys->stream[i].lastDts > 0 && (sys->stream[i].lastDts < pcr || pcr == 0))
 		{
 			pcr = sys->stream[i].lastDts;
 		}
-		if(sys->stream[i].lastPts > 0 && (sys->stream[i].lastPts < cPts || cPts == 0))
-		{
-			cPts = sys->stream[i].lastPts;
-		}
 	}
 
-	if(cPts > 0)
-		sys->currentPts = cPts;
-	
+	if(pcr > sys->currentPcr)
+		sys->currentPcr = pcr;
+
 	if(pcr > 0)
 	{
 		if(sys->lastPcr == 0)
@@ -771,7 +824,7 @@ int DemuxHTSP(demux_t *demux)
 	}
 	else
 	{
-		msg_Dbg(demux, "Ignoring packet of unknown method \"%s\"", method.c_str());
+		msg_Warn(demux, "Ignoring packet of unknown method \"%s\"", method.c_str());
 	}
 
 	return DEMUX_OK;
