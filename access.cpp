@@ -367,20 +367,24 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			return VLC_SUCCESS;
 		case DEMUX_SET_PAUSE_STATE:
 			msg_Dbg(demux, "SET_PAUSE_STATE Queried");
+			if(sys->timeshiftPeriod <= 0)
+				return VLC_EGENERIC;
 			tb = (bool)va_arg(args, int);
 			return PauseHTSP(demux, tb);
 		case DEMUX_SET_TIME:
 			msg_Dbg(demux, "SET_TIME Queried");
+			if(sys->timeshiftPeriod <= 0)
+				return VLC_EGENERIC;
 			ti = va_arg(args, int64_t);
 			tb = (bool)va_arg(args, int);
 			return SeekHTSP(demux, ti, tb);
 		case DEMUX_GET_LENGTH:
-			if(sys->currentPcr == 0)
+			if(sys->currentPcr == 0 || sys->timeshiftPeriod <= 0)
 				return VLC_EGENERIC;
 			*va_arg(args, int64_t*) = sys->currentPcr + sys->tsOffset;
 			return VLC_SUCCESS;
 		case DEMUX_GET_POSITION:
-			if(sys->currentPcr == 0)
+			if(sys->currentPcr == 0 || sys->timeshiftPeriod <= 0)
 				return VLC_EGENERIC;
 			td = sys->currentPcr + sys->tsOffset;
 			td = sys->currentPcr / td;
@@ -388,6 +392,8 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			return VLC_SUCCESS;
 		case DEMUX_SET_POSITION:
 			msg_Dbg(demux, "SET_POSITION Queried");
+			if(sys->timeshiftPeriod <= 0)
+				return VLC_EGENERIC;
 			td = va_arg(args, double);
 			tb = (bool)va_arg(args, int);
 			return SeekHTSP(demux, td * (sys->currentPcr + sys->tsOffset), tb);
