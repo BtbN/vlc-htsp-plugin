@@ -417,15 +417,13 @@ int SeekHTSP(demux_t *demux, int64_t time, bool precise)
 	HtsMap map;
 	map.setData("method", "subscriptionSeek");
 	map.setData("subscriptionId", 1);
-	map.setData("time", time);
-	map.setData("absolute", 1);
+	map.setData("time", time - sys->currentPcr);
+	map.setData("absolute", 0);
 
+	msg_Dbg(demux, "Seeking from %lld to %lld, offset %lld", (long long int)sys->currentPcr, (long long int)time, (long long int)(time - sys->currentPcr));
+	
 	if(!ReadSuccess(demux, sys, map.makeMsg(), "seek"))
 		return VLC_EGENERIC;
-
-	sys->lastPcr = 0;
-	sys->currentPcr = 0;
-	sys->tsOffset = 0;
 
 	return VLC_SUCCESS;
 }
@@ -617,17 +615,6 @@ bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 
 		sys->drops += drops;
 	}
-	else
-	{
-		msg_Dbg(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %lld, Bdrops: %d, Pdrops: %d, Idrops: %d",
-			msg.getRoot().getU32("subscriptionId"),
-			msg.getRoot().getU32("packets"),
-			msg.getRoot().getU32("bytes"),
-			(long long int)msg.getRoot().getS64("delay"),
-			msg.getRoot().getU32("Bdrops"),
-			msg.getRoot().getU32("Pdrops"),
-			msg.getRoot().getU32("Idrops"));
-	}
 	return true;
 }
 
@@ -762,6 +749,17 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	return true;
 }
 
+bool ParseSubscriptionSkip(demux_t *demux, HtsMessage &msg)
+{
+	VLC_UNUSED(msg);
+	demux_sys_t *sys = demux->p_sys;
+	sys->lastPcr = 0;
+	sys->currentPcr = 0;
+	sys->tsOffset = 0;
+	es_out_Control(demux->out, ES_OUT_RESET_PCR);
+	return true;
+}
+
 int DemuxHTSP(demux_t *demux)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -818,6 +816,13 @@ int DemuxHTSP(demux_t *demux)
 	else if(method == "muxpkt")
 	{
 		if(!ParseMuxPacket(demux, msg))
+		{
+			return DEMUX_ERROR;
+		}
+	}
+	else if(method == "subscriptionSkip")
+	{
+		if(!ParseSubscriptionSkip(demux, msg))
 		{
 			return DEMUX_ERROR;
 		}
