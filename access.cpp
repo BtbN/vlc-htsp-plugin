@@ -680,10 +680,17 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 		}
 	}
 
-	if(pcr > sys->lastPcr + sys->ptsDelay && pcr > 0)
+	if(pcr > 0)
 	{
-		es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr);
-		sys->lastPcr = pcr;
+		if(sys->lastPcr == 0)
+		{
+			sys->lastPcr = pcr;
+		}
+		else if(pcr > sys->lastPcr + sys->ptsDelay && pcr > 0)
+		{
+			es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + pcr);
+			sys->lastPcr = pcr;
+		}
 	}
 
 	es_out_Send(demux->out, sys->stream[index - 1].es, block);
