@@ -57,6 +57,7 @@ struct demux_sys_t : public sys_common_t
 		:start(0)
 		,lastPcr(0)
 		,ptsDelay(300000)
+		,timeshiftPeriod(0)
 		,streamCount(0)
 		,stream(0)
 		,host("")
@@ -84,6 +85,8 @@ struct demux_sys_t : public sys_common_t
 	mtime_t lastPcr;
 	mtime_t ptsDelay;
 
+	uint32_t timeshiftPeriod;
+	
 	uint32_t streamCount;
 	hts_stream *stream;
 
@@ -105,6 +108,8 @@ struct demux_sys_t : public sys_common_t
 
 	vlc_epg_t *epg;
 };
+
+int PauseHTSP(demux_t *demux, bool state);
 
 /***************************************************
  ****       Initialization Functions            ****
@@ -174,12 +179,13 @@ bool ConnectHTSP(demux_t *demux)
 	if(chall)
 		free(chall);
 
-	bool res = ReadSuccess(demux, sys, map.makeMsg(), "authenticate");
-	if(res)
+	HtsMessage res = ReadResult(demux, sys, map.makeMsg());
+	if(res.isValid())
 		msg_Info(demux, "Successfully authenticated!");
 	else
 		msg_Err(demux, "Authentication failed!");
-	return res;
+
+	return res.isValid();
 }
 
 void PopulateEPG(demux_t *demux)
@@ -228,13 +234,19 @@ bool SubscribeHTSP(demux_t *demux)
 	map.setData("channelId", sys->channelId);
 	map.setData("subscriptionId", 1);
 	map.setData("queueDepth", 5*1024*1024);
-	//map.setData("90khz", std::make_shared<HtsInt>(1));
-	//map.setData("normts", std::make_shared<HtsInt>(1));
+	map.setData("timeshiftPeriod", (uint32_t)~0);
+	//map.setData("90khz", 1);
+	//map.setData("normts", 1);
 
-	bool res = ReadSuccess(demux, sys, map.makeMsg(), "subscribe to channel");
-	if(res)
-		msg_Info(demux, "Successfully subscribed to channel %d", sys->channelId);
-	return res;
+	HtsMessage res = ReadResult(demux, sys, map.makeMsg());
+	if(!res.isValid())
+		return false;
+
+	sys->timeshiftPeriod = res.getRoot().getU32("timeshiftPeriod");
+
+	msg_Info(demux, "Successfully subscribed to channel %d", sys->channelId);
+
+	return true;
 }
 
 bool parseURL(demux_t *demux)
@@ -338,6 +350,8 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 	switch(i_query)
 	{
 		case DEMUX_CAN_PAUSE:
+			*va_arg(args, bool*) = (sys->timeshiftPeriod > 0);
+			return VLC_SUCCESS;
 		case DEMUX_CAN_SEEK:
 		case DEMUX_CAN_CONTROL_PACE:
 			*va_arg(args, bool*) = false;
@@ -348,6 +362,8 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 		case DEMUX_GET_TIME:
 			*va_arg(args, int64_t*) = sys->lastPcr;
 			return VLC_SUCCESS;
+		case DEMUX_SET_PAUSE_STATE:
+			return PauseHTSP(demux, (bool)va_arg(args, int));
 		default:
 			return VLC_EGENERIC;
 	}
@@ -357,6 +373,25 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
  ****       Actual Demuxing Work Functions      ****
  ***************************************************/
 
+int PauseHTSP(demux_t *demux, bool state)
+{
+	demux_sys_t *sys = demux->p_sys;
+	if(sys->timeshiftPeriod == 0)
+		return VLC_EGENERIC;
+	
+	HtsMap map;
+	map.setData("method", "subscriptionSpeed");
+	map.setData("subscriptionId", 1);
+	map.setData("speed", state?0:100);
+	
+	msg_Dbg(demux, "Set HTSP Speed to %d", state?0:100);
+	
+	if(ReadSuccess(demux, sys, map.makeMsg(), "set speed"))
+		return VLC_SUCCESS;
+	
+	return VLC_EGENERIC;
+}
+ 
 bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
