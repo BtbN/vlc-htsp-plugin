@@ -57,6 +57,7 @@ struct demux_sys_t : public sys_common_t
 		:start(0)
 		,lastPcr(0)
 		,ptsDelay(300000)
+		,currentPts(0)
 		,timeshiftPeriod(0)
 		,streamCount(0)
 		,stream(0)
@@ -84,6 +85,7 @@ struct demux_sys_t : public sys_common_t
 	mtime_t start;
 	mtime_t lastPcr;
 	mtime_t ptsDelay;
+	mtime_t currentPts;
 
 	uint32_t timeshiftPeriod;
 	
@@ -360,7 +362,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching") + sys->ptsDelay;
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
-			*va_arg(args, int64_t*) = sys->lastPcr;
+			*va_arg(args, int64_t*) = sys->currentPts;
 			return VLC_SUCCESS;
 		case DEMUX_SET_PAUSE_STATE:
 			return PauseHTSP(demux, (bool)va_arg(args, int));
@@ -432,6 +434,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 	sys->stream = new hts_stream[sys->streamCount];
 	sys->hadIFrame = false;
 	sys->lastPcr = 0;
+	sys->currentPts = 0;
 
 	for(uint32_t jj = 0; jj < streams->count(); jj++)
 	{
@@ -672,14 +675,22 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	}
 
 	mtime_t pcr = 0;
+	mtime_t cPts = 0;
 	for(uint32_t i = 0; i < sys->streamCount; i++)
 	{
 		if(sys->stream[i].lastDts > 0 && (sys->stream[i].lastDts < pcr || pcr == 0))
 		{
 			pcr = sys->stream[i].lastDts;
 		}
+		if(sys->stream[i].lastPts > 0 && (sys->stream[i].lastPts < cPts || cPts == 0))
+		{
+			cPts = sys->stream[i].lastPts;
+		}
 	}
 
+	if(cPts > 0)
+		sys->currentPts = cPts;
+	
 	if(pcr > 0)
 	{
 		if(sys->lastPcr == 0)
