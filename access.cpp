@@ -423,8 +423,8 @@ int SeekHTSP(demux_t *demux, int64_t time, bool precise)
 	HtsMap map;
 	map.setData("method", "subscriptionSeek");
 	map.setData("subscriptionId", 1);
-	map.setData("time", time - sys->currentPcr);
-	map.setData("absolute", 0);
+	map.setData("time", time);
+	map.setData("absolute", 1);
 
 	msg_Dbg(demux, "Seeking from %lld to %lld, offset %lld", (long long int)sys->currentPcr, (long long int)time, (long long int)(time - sys->currentPcr));
 	
