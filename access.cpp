@@ -54,7 +54,7 @@ struct hts_stream
 struct demux_sys_t : public sys_common_t
 {
 	demux_sys_t()
-		:start(0)
+		:pauseStart(0)
 		,lastPcr(0)
 		,ptsDelay(300000)
 		,currentPcr(0)
@@ -83,7 +83,7 @@ struct demux_sys_t : public sys_common_t
 			vlc_epg_Delete(epg);
 	}
 
-	mtime_t start;
+	mtime_t pauseStart;
 	mtime_t lastPcr;
 	mtime_t ptsDelay;
 	mtime_t currentPcr;
@@ -157,6 +157,8 @@ bool ConnectHTSP(demux_t *demux)
 	if(sys->username.empty())
 		return true;
 
+	msg_Info(demux, "Starting authentication...");
+
 	map = HtsMap();
 	map.setData("method", "authenticate");
 	map.setData("username", sys->username);
@@ -184,13 +186,15 @@ bool ConnectHTSP(demux_t *demux)
 	if(chall)
 		free(chall);
 
-	HtsMessage res = ReadResult(demux, sys, map.makeMsg());
-	if(res.isValid())
+	msg_Info(demux, "Sending authentication...");
+
+	bool res = ReadSuccess(demux, sys, map.makeMsg(), "auth");
+	if(res)
 		msg_Info(demux, "Successfully authenticated!");
 	else
 		msg_Err(demux, "Authentication failed!");
 
-	return res.isValid();
+	return res;
 }
 
 void PopulateEPG(demux_t *demux)
@@ -330,8 +334,6 @@ int OpenHTSP(vlc_object_t *obj)
 		return VLC_EGENERIC;
 	}
 
-	sys->start = mdate();
-
 	return VLC_SUCCESS;
 }
 
@@ -354,6 +356,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 	bool tb = false;
 	int64_t ti = 0;
 	double td = 0.0d;
+	double totalTime = sys->currentPcr + sys->tsOffset + ((sys->pauseStart > 0)?(mdate() - sys->pauseStart):0);
 
 	switch(i_query)
 	{
@@ -380,14 +383,12 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 		case DEMUX_GET_LENGTH:
 			if(sys->currentPcr == 0 || sys->timeshiftPeriod <= 0)
 				return VLC_EGENERIC;
-			*va_arg(args, int64_t*) = sys->currentPcr + sys->tsOffset;
+			*va_arg(args, int64_t*) = totalTime;
 			return VLC_SUCCESS;
 		case DEMUX_GET_POSITION:
 			if(sys->currentPcr == 0 || sys->timeshiftPeriod <= 0)
 				return VLC_EGENERIC;
-			td = sys->currentPcr + sys->tsOffset;
-			td = sys->currentPcr / td;
-			*va_arg(args, double*) = td;
+			*va_arg(args, double*) = sys->currentPcr / totalTime;
 			return VLC_SUCCESS;
 		case DEMUX_SET_POSITION:
 			msg_Dbg(demux, "SET_POSITION Queried");
@@ -395,9 +396,9 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 				return VLC_EGENERIC;
 			td = va_arg(args, double);
 			tb = (bool)va_arg(args, int);
-			return SeekHTSP(demux, td * (sys->currentPcr + sys->tsOffset), tb);
+			return SeekHTSP(demux, td * totalTime, tb);
 		case DEMUX_GET_PTS_DELAY:
-			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching") + sys->ptsDelay;
+			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching");
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
 			if(sys->currentPcr == 0)
@@ -446,10 +447,15 @@ int PauseHTSP(demux_t *demux, bool state)
 
 	msg_Dbg(demux, "Set HTSP Speed to %d", state?0:100);
 
-	if(ReadSuccess(demux, sys, map.makeMsg(), "set speed"))
-		return VLC_SUCCESS;
+	if(!ReadSuccess(demux, sys, map.makeMsg(), "set speed"))
+		return VLC_EGENERIC;
 
-	return VLC_EGENERIC;
+	if(state)
+		sys->pauseStart = mdate();
+	else
+		sys->pauseStart = 0;
+
+	return VLC_SUCCESS;
 }
 
 bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
@@ -756,12 +762,26 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 
 bool ParseSubscriptionSkip(demux_t *demux, HtsMessage &msg)
 {
-	VLC_UNUSED(msg);
 	demux_sys_t *sys = demux->p_sys;
-	sys->lastPcr = 0;
-	sys->currentPcr = 0;
+
+	if(msg.getRoot().contains("error") || msg.getRoot().contains("size") || !msg.getRoot().contains("time"))
+		return true;
+
+	int64_t newTime = msg.getRoot().getS64("time");
+
+	if(!msg.getRoot().getU32("absolute"))
+		newTime += sys->currentPcr;
+
+	msg_Info(demux, "SubscriptionSkip: newTime: %lld, base: %s", (long long int)newTime, (msg.getRoot().getU32("absolute"))?"abs":"rel");
+
+	es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + newTime);
+
+	msg_Info(demux, "PCR Reset done");
+
+	sys->lastPcr = newTime;
+	sys->currentPcr = newTime;
 	sys->tsOffset = 0;
-	es_out_Control(demux->out, ES_OUT_RESET_PCR);
+
 	return true;
 }
 
