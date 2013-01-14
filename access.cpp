@@ -240,8 +240,7 @@ bool SubscribeHTSP(demux_t *demux)
 	map.setData("subscriptionId", 1);
 	map.setData("queueDepth", 5*1024*1024);
 	map.setData("timeshiftPeriod", (uint32_t)~0);
-	//map.setData("90khz", 1);
-	//map.setData("normts", 1);
+	map.setData("normts", 1);
 
 	HtsMessage res = ReadResult(demux, sys, map.makeMsg());
 	if(!res.isValid())
@@ -427,7 +426,7 @@ int SeekHTSP(demux_t *demux, int64_t time, bool precise)
 	map.setData("absolute", 1);
 
 	msg_Dbg(demux, "Seeking from %lld to %lld, offset %lld", (long long int)sys->currentPcr, (long long int)time, (long long int)(time - sys->currentPcr));
-	
+
 	if(!ReadSuccess(demux, sys, map.makeMsg(), "seek"))
 		return VLC_EGENERIC;
 
