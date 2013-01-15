@@ -54,11 +54,12 @@ struct hts_stream
 struct demux_sys_t : public sys_common_t
 {
 	demux_sys_t()
-		:pauseStart(0)
-		,lastPcr(0)
+		:lastPcr(0)
 		,ptsDelay(300000)
 		,currentPcr(0)
 		,tsOffset(0)
+		,tsStart(0)
+		,tsEnd(0)
 		,timeshiftPeriod(0)
 		,streamCount(0)
 		,stream(0)
@@ -83,11 +84,13 @@ struct demux_sys_t : public sys_common_t
 			vlc_epg_Delete(epg);
 	}
 
-	mtime_t pauseStart;
 	mtime_t lastPcr;
 	mtime_t ptsDelay;
 	mtime_t currentPcr;
+	
 	mtime_t tsOffset;
+	mtime_t tsStart;
+	mtime_t tsEnd;
 
 	uint32_t timeshiftPeriod;
 
@@ -356,7 +359,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 	bool tb = false;
 	int64_t ti = 0;
 	double td = 0.0d;
-	double totalTime = sys->currentPcr + sys->tsOffset + ((sys->pauseStart > 0)?(mdate() - sys->pauseStart):0);
+	double totalTime = sys->tsEnd - sys->tsStart;
 
 	switch(i_query)
 	{
@@ -377,7 +380,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 			msg_Dbg(demux, "SET_TIME Queried");
 			if(sys->timeshiftPeriod <= 0)
 				return VLC_EGENERIC;
-			ti = va_arg(args, int64_t);
+			ti = va_arg(args, int64_t) + sys->tsStart;
 			tb = (bool)va_arg(args, int);
 			return SeekHTSP(demux, ti, tb);
 		case DEMUX_GET_LENGTH:
@@ -388,7 +391,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 		case DEMUX_GET_POSITION:
 			if(sys->currentPcr == 0 || sys->timeshiftPeriod <= 0)
 				return VLC_EGENERIC;
-			*va_arg(args, double*) = sys->currentPcr / totalTime;
+			*va_arg(args, double*) = (sys->currentPcr - sys->tsStart) / totalTime;
 			return VLC_SUCCESS;
 		case DEMUX_SET_POSITION:
 			msg_Dbg(demux, "SET_POSITION Queried");
@@ -396,14 +399,14 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 				return VLC_EGENERIC;
 			td = va_arg(args, double);
 			tb = (bool)va_arg(args, int);
-			return SeekHTSP(demux, td * totalTime, tb);
+			return SeekHTSP(demux, td * totalTime + sys->tsStart, tb);
 		case DEMUX_GET_PTS_DELAY:
 			*va_arg(args, int64_t*) = INT64_C(1000) * var_InheritInteger(demux, "network-caching");
 			return VLC_SUCCESS;
 		case DEMUX_GET_TIME:
 			if(sys->currentPcr == 0)
 				return VLC_EGENERIC;
-			*va_arg(args, int64_t*) = sys->currentPcr;
+			*va_arg(args, int64_t*) = sys->currentPcr - sys->tsStart;
 			return VLC_SUCCESS;
 		default:
 			return VLC_EGENERIC;
@@ -449,11 +452,6 @@ int PauseHTSP(demux_t *demux, bool state)
 
 	if(!ReadSuccess(demux, sys, map.makeMsg(), "set speed"))
 		return VLC_EGENERIC;
-
-	if(state)
-		sys->pauseStart = mdate();
-	else
-		sys->pauseStart = 0;
 
 	return VLC_SUCCESS;
 }
@@ -760,6 +758,17 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	return true;
 }
 
+bool ParseTimeshiftStatus(demux_t *demux, HtsMessage &msg)
+{
+	demux_sys_t *sys = demux->p_sys;
+	
+	sys->tsOffset = msg.getRoot().getS64("shift");
+	sys->tsStart = msg.getRoot().getS64("start");
+	sys->tsEnd = msg.getRoot().getS64("end");
+
+	return true;
+}
+
 bool ParseSubscriptionSkip(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
@@ -803,7 +812,14 @@ int DemuxHTSP(demux_t *demux)
 	if(subs != 1)
 		return DEMUX_OK;
 
-	if(method == "subscriptionStart")
+	if(method == "muxpkt")
+	{
+		if(!ParseMuxPacket(demux, msg))
+		{
+			return DEMUX_ERROR;
+		}
+	}
+	else if(method == "subscriptionStart")
 	{
 		if(!ParseSubscriptionStart(demux, msg))
 		{
@@ -838,9 +854,9 @@ int DemuxHTSP(demux_t *demux)
 			return DEMUX_ERROR;
 		}
 	}
-	else if(method == "muxpkt")
+	else if(method == "timeshiftStatus")
 	{
-		if(!ParseMuxPacket(demux, msg))
+		if(!ParseTimeshiftStatus(demux, msg))
 		{
 			return DEMUX_ERROR;
 		}
