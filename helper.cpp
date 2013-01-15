@@ -128,7 +128,7 @@ HtsMessage ReadResultEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m, bool
 	if(sequence)
 	{
 		iSequence = HTSPNextSeqNum(sys);
-		m.getRoot().setData("seq", iSequence);
+		m.getRoot()->setData("seq", iSequence);
 	}
 
 	if(!TransmitMessageEx(obj, sys, m))
@@ -144,7 +144,7 @@ HtsMessage ReadResultEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m, bool
 	{
 		if(!sequence)
 			break;
-		if(m.getRoot().contains("seq") && m.getRoot().getU32("seq") == iSequence)
+		if(m.getRoot()->contains("seq") && m.getRoot()->getU32("seq") == iSequence)
 			break;
 
 		queue.push_back(m);
@@ -164,12 +164,12 @@ HtsMessage ReadResultEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m, bool
 		return HtsMessage();
 	}
 
-	if(m.getRoot().contains("error"))
+	if(m.getRoot()->contains("error"))
 	{
-		msg_Err(obj, "HTSP Error: %s", m.getRoot().getStr("error").c_str());
+		msg_Err(obj, "HTSP Error: %s", m.getRoot()->getStr("error").c_str());
 		return HtsMessage();
 	}
-	if(m.getRoot().getU32("noaccess") != 0)
+	if(m.getRoot()->getU32("noaccess") != 0)
 	{
 		msg_Err(obj, "Access Denied");
 		return HtsMessage();

@@ -84,11 +84,11 @@ bool ConnectSD(services_discovery_t *sd)
 
 	uint32_t chall_len;
 	void * chall;
-	m.getRoot().getBin("challenge", &chall_len, &chall);
+	m.getRoot()->getBin("challenge", &chall_len, &chall);
 
-	std::string serverName = m.getRoot().getStr("servername");
-	std::string serverVersion = m.getRoot().getStr("serverversion");
-	uint32_t protoVersion = m.getRoot().getU32("htspversion");
+	std::string serverName = m.getRoot()->getStr("servername");
+	std::string serverVersion = m.getRoot()->getStr("serverversion");
+	uint32_t protoVersion = m.getRoot()->getU32("htspversion");
 
 	msg_Info(sd, "Connected to HTSP Server %s, version %s, protocol %d", serverName.c_str(), serverVersion.c_str(), protoVersion);
 
@@ -153,7 +153,7 @@ bool GetChannels(services_discovery_t *sd)
 	HtsMessage m;
 	while((m = ReadMessage(sd, sys)).isValid())
 	{
-		std::string method = m.getRoot().getStr("method");
+		std::string method = m.getRoot()->getStr("method");
 		if(method.empty() || method == "initialSyncCompleted")
 		{
 			msg_Info(sd, "Finished getting initial metadata sync");
@@ -162,17 +162,17 @@ bool GetChannels(services_discovery_t *sd)
 
 		if(method == "channelAdd")
 		{
-			if(!m.getRoot().contains("channelId"))
+			if(!m.getRoot()->contains("channelId"))
 				continue;
-			uint32_t cid = m.getRoot().getU32("channelId");
+			uint32_t cid = m.getRoot()->getU32("channelId");
 
-			std::string cname = m.getRoot().getStr("channelName");
+			std::string cname = m.getRoot()->getStr("channelName");
 			if(cname.empty())
 				continue;
 
-			if(!m.getRoot().contains("channelNumber"))
+			if(!m.getRoot()->contains("channelNumber"))
 				continue;
-			uint32_t cnum = m.getRoot().getU32("channelNumber");
+			uint32_t cnum = m.getRoot()->getU32("channelNumber");
 
 			std::ostringstream oss;
 			oss << "htsp://";
@@ -239,7 +239,7 @@ void * RunSD(void *obj)
 		if(!msg.isValid())
 			return 0;
 
-		std::string method = msg.getRoot().getStr("method");
+		std::string method = msg.getRoot()->getStr("method");
 		if(method.empty())
 			return 0;
 

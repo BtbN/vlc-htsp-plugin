@@ -27,6 +27,8 @@
 #include <vlc_meta.h>
 
 #include <ctime>
+#include <queue>
+#include <atomic>
 
 #include "access.h"
 #include "helper.h"
@@ -71,7 +73,10 @@ struct demux_sys_t : public sys_common_t
 		,hadIFrame(false)
 		,drops(0)
 		,epg(0)
-	{}
+	{
+		vlc_mutex_init(&queueMutex);
+		vlc_cond_init(&queueCond);
+	}
 
 	~demux_sys_t()
 	{
@@ -79,6 +84,9 @@ struct demux_sys_t : public sys_common_t
 			delete[] stream;
 
 		vlc_UrlClean(&url);
+		
+		vlc_mutex_destroy(&queueMutex);
+		vlc_cond_destroy(&queueCond);
 
 		if(epg)
 			vlc_epg_Delete(epg);
@@ -87,10 +95,10 @@ struct demux_sys_t : public sys_common_t
 	mtime_t lastPcr;
 	mtime_t ptsDelay;
 	mtime_t currentPcr;
-	
-	mtime_t tsOffset;
-	mtime_t tsStart;
-	mtime_t tsEnd;
+
+	std::atomic<mtime_t> tsOffset;
+	std::atomic<mtime_t> tsStart;
+	std::atomic<mtime_t> tsEnd;
 
 	uint32_t timeshiftPeriod;
 
@@ -114,10 +122,16 @@ struct demux_sys_t : public sys_common_t
 	uint32_t drops;
 
 	vlc_epg_t *epg;
+	
+	vlc_mutex_t queueMutex;
+	vlc_cond_t queueCond;
+	vlc_thread_t thread;
+	std::queue<HtsMessage> msgQueue;
 };
 
 int PauseHTSP(demux_t *demux, bool state);
 int SeekHTSP(demux_t *demux, int64_t time, bool precise);
+void * RunHTSP(void *obj);
 
 /***************************************************
  ****       Initialization Functions            ****
@@ -150,10 +164,10 @@ bool ConnectHTSP(demux_t *demux)
 	uint32_t chall_len;
 	void * chall;
 
-	sys->serverName = m.getRoot().getStr("servername");
-	sys->serverVersion = m.getRoot().getStr("serverversion");
-	sys->protoVersion = m.getRoot().getU32("htspversion");
-	m.getRoot().getBin("challenge", &chall_len, &chall);
+	sys->serverName = m.getRoot()->getStr("servername");
+	sys->serverVersion = m.getRoot()->getStr("serverversion");
+	sys->protoVersion = m.getRoot()->getU32("htspversion");
+	m.getRoot()->getBin("challenge", &chall_len, &chall);
 
 	msg_Info(demux, "Connected to HTSP Server %s, version %s, protocol %d", sys->serverName.c_str(), sys->serverVersion.c_str(), sys->protoVersion);
 
@@ -214,7 +228,7 @@ void PopulateEPG(demux_t *demux)
 
 	sys->epg = vlc_epg_New(0);
 
-	std::shared_ptr<HtsList> events = res.getRoot().getList("events");
+	std::shared_ptr<HtsList> events = res.getRoot()->getList("events");
 	for(uint32_t i = 0; i < events->count(); i++)
 	{
 		std::shared_ptr<HtsData> tmp = events->getData(i);
@@ -253,7 +267,7 @@ bool SubscribeHTSP(demux_t *demux)
 	if(!res.isValid())
 		return false;
 
-	sys->timeshiftPeriod = res.getRoot().getU32("timeshiftPeriod");
+	sys->timeshiftPeriod = res.getRoot()->getU32("timeshiftPeriod");
 
 	msg_Info(demux, "Successfully subscribed to channel %d", sys->channelId);
 
@@ -337,6 +351,12 @@ int OpenHTSP(vlc_object_t *obj)
 		return VLC_EGENERIC;
 	}
 
+	if(vlc_clone(&sys->thread, RunHTSP, demux, VLC_THREAD_PRIORITY_INPUT))
+	{
+		delete sys;
+		return VLC_EGENERIC;
+	}
+
 	return VLC_SUCCESS;
 }
 
@@ -347,6 +367,9 @@ void CloseHTSP(vlc_object_t *obj)
 
 	if(!sys)
 		return;
+
+	vlc_cancel(sys->thread);
+	vlc_join(sys->thread, 0);
 
 	delete sys;
 	sys = demux->p_sys = 0;
@@ -417,6 +440,50 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
  ****       Actual Demuxing Work Functions      ****
  ***************************************************/
 
+void ParseTimeshiftStatus(demux_t *demux, HtsMessage &msg)
+{
+	demux_sys_t *sys = demux->p_sys;
+
+	sys->tsOffset = msg.getRoot()->getS64("shift");
+	sys->tsStart = msg.getRoot()->getS64("start");
+	sys->tsEnd = msg.getRoot()->getS64("end");
+}
+ 
+void * RunHTSP(void *obj)
+{
+	demux_t *demux = (demux_t*)obj;
+	demux_sys_t *sys = demux->p_sys;
+	
+	for(;;)
+	{
+		HtsMessage msg = ReadMessage(demux, sys);
+		if(!msg.isValid())
+		{
+			vlc_mutex_lock(&sys->queueMutex);
+			vlc_cond_signal(&sys->queueCond);
+			vlc_mutex_unlock(&sys->queueMutex);
+			return 0;
+		}
+		
+		std::string method = msg.getRoot()->getStr("method");
+		uint32_t subs = msg.getRoot()->getU32("subscriptionId");
+		
+		if(method == "timeshiftStatus" && subs == 1)
+		{
+			ParseTimeshiftStatus(demux, msg);
+		}
+		else
+		{
+			vlc_mutex_lock(&sys->queueMutex);
+			sys->msgQueue.push(msg);
+			vlc_cond_signal(&sys->queueCond);
+			vlc_mutex_unlock(&sys->queueMutex);
+		}
+	}
+	
+	return 0;
+}
+ 
 int SeekHTSP(demux_t *demux, int64_t time, bool precise)
 {
 	VLC_UNUSED(precise);
@@ -469,9 +536,9 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 		sys->streamCount = 0;
 	}
 
-	if(msg.getRoot().contains("sourceinfo") && sys->epg != 0)
+	if(msg.getRoot()->contains("sourceinfo") && sys->epg != 0)
 	{
-		std::shared_ptr<HtsMap> srcinfo = msg.getRoot().getMap("sourceinfo");
+		std::shared_ptr<HtsMap> srcinfo = msg.getRoot()->getMap("sourceinfo");
 
 		vlc_meta_t *meta = vlc_meta_New();
 		vlc_meta_SetTitle(meta, srcinfo->getStr("service").c_str());
@@ -483,7 +550,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 		sys->epg = 0;
 	}
 
-	std::shared_ptr<HtsList> streams = msg.getRoot().getList("streams");
+	std::shared_ptr<HtsList> streams = msg.getRoot()->getList("streams");
 	if(streams->count() <= 0)
 	{
 		msg_Err(demux, "Malformed SubscriptionStart!");
@@ -594,13 +661,13 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
 bool ParseSubscriptionStop(demux_t *demux, HtsMessage &msg)
 {
-	msg_Info(demux, "HTS Subscription Stop: subscriptionId: %d, status: %s", msg.getRoot().getU32("subscriptionId"), msg.getRoot().getStr("status").c_str());
+	msg_Info(demux, "HTS Subscription Stop: subscriptionId: %d, status: %s", msg.getRoot()->getU32("subscriptionId"), msg.getRoot()->getStr("status").c_str());
 	return false;
 }
 
 bool ParseSubscriptionStatus(demux_t *demux, HtsMessage &msg)
 {
-	msg_Dbg(demux, "HTS Subscription Status: subscriptionId: %d, status: %s", msg.getRoot().getU32("subscriptionId"), msg.getRoot().getStr("status").c_str());
+	msg_Dbg(demux, "HTS Subscription Status: subscriptionId: %d, status: %s", msg.getRoot()->getU32("subscriptionId"), msg.getRoot()->getStr("status").c_str());
 	return true;
 }
 
@@ -608,19 +675,19 @@ bool ParseQueueStatus(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
 
-	uint32_t drops = msg.getRoot().getU32("Bdrops") + msg.getRoot().getU32("Pdrops") + msg.getRoot().getU32("Idrops");
+	uint32_t drops = msg.getRoot()->getU32("Bdrops") + msg.getRoot()->getU32("Pdrops") + msg.getRoot()->getU32("Idrops");
 	if(drops > sys->drops)
 	{
 
 		msg_Warn(demux, "Can't keep up! HTS dropped %d frames!", drops - sys->drops);
 		msg_Warn(demux, "HTS Queue Status: subscriptionId: %d, Packets: %d, Bytes: %d, Delay: %lld, Bdrops: %d, Pdrops: %d, Idrops: %d",
-			msg.getRoot().getU32("subscriptionId"),
-			msg.getRoot().getU32("packets"),
-			msg.getRoot().getU32("bytes"),
-			(long long int)msg.getRoot().getS64("delay"),
-			msg.getRoot().getU32("Bdrops"),
-			msg.getRoot().getU32("Pdrops"),
-			msg.getRoot().getU32("Idrops"));
+			msg.getRoot()->getU32("subscriptionId"),
+			msg.getRoot()->getU32("packets"),
+			msg.getRoot()->getU32("bytes"),
+			(long long int)msg.getRoot()->getS64("delay"),
+			msg.getRoot()->getU32("Bdrops"),
+			msg.getRoot()->getU32("Pdrops"),
+			msg.getRoot()->getU32("Idrops"));
 
 		sys->drops += drops;
 	}
@@ -638,13 +705,13 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
 
-	uint32_t index = msg.getRoot().getU32("stream");
+	uint32_t index = msg.getRoot()->getU32("stream");
 
-	sys->tsOffset = msg.getRoot().getS64("timeshift");
+	sys->tsOffset = msg.getRoot()->getS64("timeshift");
 
 	void *bin = 0;
 	uint32_t binlen = 0;
-	msg.getRoot().getBin("payload", &binlen, &bin);
+	msg.getRoot()->getBin("payload", &binlen, &bin);
 
 	int64_t pts = 0;
 	int64_t dts = 0;
@@ -689,14 +756,14 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	bin = 0;
 
 	pts = block->i_pts = VLC_TS_INVALID;
-	if(msg.getRoot().contains("pts"))
-		pts = block->i_pts = msg.getRoot().getS64("pts");
+	if(msg.getRoot()->contains("pts"))
+		pts = block->i_pts = msg.getRoot()->getS64("pts");
 
 	dts = block->i_dts = VLC_TS_INVALID;
-	if(msg.getRoot().contains("dts"))
-		dts = block->i_dts = msg.getRoot().getS64("dts");
+	if(msg.getRoot()->contains("dts"))
+		dts = block->i_dts = msg.getRoot()->getS64("dts");
 
-	int64_t duration = msg.getRoot().getS64("duration");
+	int64_t duration = msg.getRoot()->getS64("duration");
 	if(duration != 0)
 		block->i_length = duration;
 
@@ -705,7 +772,7 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	if(dts > 0)
 		sys->stream[index - 1].lastDts = dts;
 
-	frametype = msg.getRoot().getU32("frametype");
+	frametype = msg.getRoot()->getU32("frametype");
 	if(sys->stream[index - 1].fmt.i_cat == VIDEO_ES && frametype != 0)
 	{
 		char ft = (char)frametype;
@@ -758,30 +825,19 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
 	return true;
 }
 
-bool ParseTimeshiftStatus(demux_t *demux, HtsMessage &msg)
-{
-	demux_sys_t *sys = demux->p_sys;
-	
-	sys->tsOffset = msg.getRoot().getS64("shift");
-	sys->tsStart = msg.getRoot().getS64("start");
-	sys->tsEnd = msg.getRoot().getS64("end");
-
-	return true;
-}
-
 bool ParseSubscriptionSkip(demux_t *demux, HtsMessage &msg)
 {
 	demux_sys_t *sys = demux->p_sys;
 
-	if(msg.getRoot().contains("error") || msg.getRoot().contains("size") || !msg.getRoot().contains("time"))
+	if(msg.getRoot()->contains("error") || msg.getRoot()->contains("size") || !msg.getRoot()->contains("time"))
 		return true;
 
-	int64_t newTime = msg.getRoot().getS64("time");
+	int64_t newTime = msg.getRoot()->getS64("time");
 
-	if(!msg.getRoot().getU32("absolute"))
+	if(!msg.getRoot()->getU32("absolute"))
 		newTime += sys->currentPcr;
 
-	msg_Info(demux, "SubscriptionSkip: newTime: %lld, base: %s", (long long int)newTime, (msg.getRoot().getU32("absolute"))?"abs":"rel");
+	msg_Info(demux, "SubscriptionSkip: newTime: %lld, base: %s", (long long int)newTime, (msg.getRoot()->getU32("absolute"))?"abs":"rel");
 
 	es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + newTime);
 
@@ -800,15 +856,25 @@ int DemuxHTSP(demux_t *demux)
 	if(sys->channelId == 0)
 		return DEMUX_EOF;
 
-	HtsMessage msg = ReadMessage(demux, sys);
+	vlc_mutex_lock(&sys->queueMutex);
+	if(sys->msgQueue.size() == 0)
+		vlc_cond_wait(&sys->queueCond, &sys->queueMutex);
+	if(sys->msgQueue.size() == 0)
+	{
+		vlc_mutex_unlock(&sys->queueMutex);
+		return DEMUX_EOF;
+	}
+	HtsMessage msg = sys->msgQueue.front();
+	sys->msgQueue.pop();
+	vlc_mutex_unlock(&sys->queueMutex);
 	if(!msg.isValid())
 		return DEMUX_EOF;
 
-	std::string method = msg.getRoot().getStr("method");
+	std::string method = msg.getRoot()->getStr("method");
 	if(method.empty())
 		return DEMUX_ERROR;
 
-	uint32_t subs = msg.getRoot().getU32("subscriptionId");
+	uint32_t subs = msg.getRoot()->getU32("subscriptionId");
 	if(subs != 1)
 		return DEMUX_OK;
 
@@ -850,13 +916,6 @@ int DemuxHTSP(demux_t *demux)
 	else if(method == "signalStatus")
 	{
 		if(!ParseSignalStatus(demux, msg))
-		{
-			return DEMUX_ERROR;
-		}
-	}
-	else if(method == "timeshiftStatus")
-	{
-		if(!ParseTimeshiftStatus(demux, msg))
 		{
 			return DEMUX_ERROR;
 		}

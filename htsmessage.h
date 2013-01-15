@@ -200,13 +200,13 @@ class HtsMessage
 	static HtsMessage Deserialize(uint32_t length, void *buf);
 	bool Serialize(uint32_t *length, void **buf);
 
-	HtsMap &getRoot() { return root; }
-	void setRoot(HtsMap newRoot) { root = newRoot; valid = true; }
+	std::shared_ptr<HtsMap> getRoot() { return root; }
+	void setRoot(std::shared_ptr<HtsMap> newRoot) { root = newRoot; valid = true; }
 	bool isValid() { return valid; }
 
 	private:
 	bool valid;
-	HtsMap root;
+	std::shared_ptr<HtsMap> root;
 };
 
 #endif

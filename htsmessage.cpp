@@ -116,7 +116,7 @@ HtsMap::HtsMap(uint32_t /*length*/, void *buf)
 HtsMessage HtsMap::makeMsg()
 {
 	HtsMessage res;
-	res.setRoot(*this);
+	res.setRoot(std::make_shared<HtsMap>(*this));
 	return res;
 }
 
@@ -432,8 +432,8 @@ bool HtsMessage::Serialize(uint32_t *length, void **buf)
 	*length = 0;
 	*buf = 0;
 
-	HtsMap map = getRoot();
-	auto umap = map.getRawData();
+	std::shared_ptr<HtsMap> map = getRoot();
+	auto umap = map->getRawData();
 	for(auto it = umap.begin(); it != umap.end(); ++it)
 		resLength += it->second->calcSize();
 
@@ -450,19 +450,6 @@ bool HtsMessage::Serialize(uint32_t *length, void **buf)
 		it->second->Serialize(tmpbuf);
 		tmpbuf += it->second->calcSize();
 	}
-
-	/*printf("Calculated total size %d\n", resLength + 4);
-	for(uint32_t i = 0; i < resLength; i++)
-	{
-		char an = resBuf[i];
-		if((an >= 'a' && an <= 'z') || (an >= 'A' && an <= 'Z'))
-			an = resBuf[i];
-		else
-			an = '-';
-
-		printf("0x%X(%c) ", resBuf[i], an);
-	}
-	printf("\n");*/
 
 	*length = resLength+4;
 	*buf = resBuf;
