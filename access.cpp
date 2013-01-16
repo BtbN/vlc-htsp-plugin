@@ -73,6 +73,8 @@ struct demux_sys_t : public sys_common_t
 		,hadIFrame(false)
 		,drops(0)
 		,epg(0)
+		,requestPause(-1)
+		,requestSeek(-1)
 	{
 		vlc_mutex_init(&queueMutex);
 		vlc_cond_init(&queueCond);
@@ -84,7 +86,7 @@ struct demux_sys_t : public sys_common_t
 			delete[] stream;
 
 		vlc_UrlClean(&url);
-		
+
 		vlc_mutex_destroy(&queueMutex);
 		vlc_cond_destroy(&queueCond);
 
@@ -122,11 +124,13 @@ struct demux_sys_t : public sys_common_t
 	uint32_t drops;
 
 	vlc_epg_t *epg;
-	
+
 	vlc_mutex_t queueMutex;
 	vlc_cond_t queueCond;
 	vlc_thread_t thread;
 	std::queue<HtsMessage> msgQueue;
+	std::atomic<int> requestPause;
+	std::atomic<int64_t> requestSeek;
 };
 
 int PauseHTSP(demux_t *demux, bool state);
@@ -448,29 +452,33 @@ void ParseTimeshiftStatus(demux_t *demux, HtsMessage &msg)
 	sys->tsStart = msg.getRoot()->getS64("start");
 	sys->tsEnd = msg.getRoot()->getS64("end");
 }
- 
+
 void * RunHTSP(void *obj)
 {
 	demux_t *demux = (demux_t*)obj;
 	demux_sys_t *sys = demux->p_sys;
-	
+
 	for(;;)
 	{
 		HtsMessage msg = ReadMessage(demux, sys);
 		if(!msg.isValid())
 		{
 			vlc_mutex_lock(&sys->queueMutex);
+			sys->msgQueue.push(HtsMessage());
 			vlc_cond_signal(&sys->queueCond);
 			vlc_mutex_unlock(&sys->queueMutex);
 			return 0;
 		}
-		
+
 		std::string method = msg.getRoot()->getStr("method");
 		uint32_t subs = msg.getRoot()->getU32("subscriptionId");
-		
+
 		if(method == "timeshiftStatus" && subs == 1)
 		{
 			ParseTimeshiftStatus(demux, msg);
+			vlc_mutex_lock(&sys->queueMutex);
+			msg_Dbg(demux, "Current queue size: %lld", (long long int)sys->msgQueue.size());
+			vlc_mutex_unlock(&sys->queueMutex);
 		}
 		else
 		{
@@ -479,27 +487,48 @@ void * RunHTSP(void *obj)
 			vlc_cond_signal(&sys->queueCond);
 			vlc_mutex_unlock(&sys->queueMutex);
 		}
+
+		if(sys->requestPause >= 0)
+		{
+			HtsMap map;
+			map.setData("method", "subscriptionSpeed");
+			map.setData("subscriptionId", 1);
+			map.setData("speed", (int)sys->requestPause);
+
+			ReadSuccess(demux, sys, map.makeMsg(), "set speed");
+
+			sys->requestPause = -1;
+		}
+
+		if(sys->requestSeek >= 0)
+		{
+			HtsMap map;
+			map.setData("method", "subscriptionSeek");
+			map.setData("subscriptionId", 1);
+			map.setData("time", (int64_t)sys->requestSeek);
+			map.setData("absolute", 1);
+
+			ReadSuccess(demux, sys, map.makeMsg(), "seek");
+
+			sys->requestSeek = -1;
+		}
 	}
-	
+
 	return 0;
 }
- 
+
 int SeekHTSP(demux_t *demux, int64_t time, bool precise)
 {
 	VLC_UNUSED(precise);
 
 	demux_sys_t *sys = demux->p_sys;
-
-	HtsMap map;
-	map.setData("method", "subscriptionSeek");
-	map.setData("subscriptionId", 1);
-	map.setData("time", time);
-	map.setData("absolute", 1);
-
-	msg_Dbg(demux, "Seeking from %lld to %lld, offset %lld", (long long int)sys->currentPcr, (long long int)time, (long long int)(time - sys->currentPcr));
-
-	if(!ReadSuccess(demux, sys, map.makeMsg(), "seek"))
+	if(sys->timeshiftPeriod == 0)
 		return VLC_EGENERIC;
+
+	if(sys->requestSeek >= 0)
+		return VLC_EGENERIC;
+
+	sys->requestSeek = time;
 
 	return VLC_SUCCESS;
 }
@@ -510,15 +539,10 @@ int PauseHTSP(demux_t *demux, bool state)
 	if(sys->timeshiftPeriod == 0)
 		return VLC_EGENERIC;
 
-	HtsMap map;
-	map.setData("method", "subscriptionSpeed");
-	map.setData("subscriptionId", 1);
-	map.setData("speed", state?0:100);
-
-	msg_Dbg(demux, "Set HTSP Speed to %d", state?0:100);
-
-	if(!ReadSuccess(demux, sys, map.makeMsg(), "set speed"))
+	if(sys->requestPause >= 0)
 		return VLC_EGENERIC;
+
+	sys->requestPause = (state?0:100);
 
 	return VLC_SUCCESS;
 }
@@ -858,11 +882,9 @@ int DemuxHTSP(demux_t *demux)
 
 	vlc_mutex_lock(&sys->queueMutex);
 	if(sys->msgQueue.size() == 0)
-		vlc_cond_wait(&sys->queueCond, &sys->queueMutex);
-	if(sys->msgQueue.size() == 0)
 	{
 		vlc_mutex_unlock(&sys->queueMutex);
-		return DEMUX_EOF;
+		return DEMUX_OK;
 	}
 	HtsMessage msg = sys->msgQueue.front();
 	sys->msgQueue.pop();

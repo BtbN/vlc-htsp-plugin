@@ -73,6 +73,7 @@ HtsMessage ReadMessageEx(vlc_object_t *obj, sys_common_t *sys)
 {
 	char *buf;
 	uint32_t len;
+	ssize_t readSize;
 
 	if(sys->queue.size())
 	{
@@ -81,36 +82,54 @@ HtsMessage ReadMessageEx(vlc_object_t *obj, sys_common_t *sys)
 		return res;
 	}
 
-	if(net_Read(obj, sys->netfd, NULL, &len, sizeof(len), false) != sizeof(len))
+	time_t start = time(0);
+	while((readSize = net_Read(obj, sys->netfd, NULL, &len, sizeof(len), false)) != sizeof(len))
 	{
-		msg_Err(obj, "Error reading from socket: %s", strerror(errno));
-		return HtsMessage();
+		if(readSize == 0)
+		{
+			msg_Err(obj, "Size Read EOF!");
+			return HtsMessage();
+		}
+
+		if(readSize > 0)
+		{
+			msg_Err(obj, "Error reading from socket");
+			return HtsMessage();
+		}
+
+		if(difftime(time(0), start) > READ_TIMEOUT)
+		{
+			msg_Err(obj, "Read timed out!");
+			return HtsMessage();
+		}
 	}
 
 	len = ntohl(len);
-
 	if(len == 0)
 		return HtsMessage();
 
 	buf = (char*)malloc(len);
 
-	ssize_t read;
 	char *wbuf = buf;
-	ssize_t tlen = len;
-	time_t start = time(0);
-	while((read = net_Read(obj, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
+	uint32_t tlen = len;
+	start = time(0);
+	while((readSize = net_Read(obj, sys->netfd, NULL, wbuf, tlen, false)) < tlen)
 	{
-		wbuf += read;
-		tlen -= read;
+		wbuf += readSize;
+		tlen -= readSize;
 
-		if(difftime(start, time(0)) > READ_TIMEOUT)
+		if(difftime(time(0), start) > READ_TIMEOUT || readSize == 0)
 		{
-			msg_Err(obj, "Read timeout!");
+			if(readSize == 0)
+				msg_Err(obj, "Read EOF!");
+			else
+				msg_Err(obj, "Read timed out!");
 			free(buf);
 			return HtsMessage();
 		}
+
 	}
-	if(read > tlen)
+	if(readSize > tlen)
 	{
 		msg_Dbg(obj, "WTF");
 		free(buf);
