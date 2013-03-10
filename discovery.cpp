@@ -73,7 +73,7 @@ bool ConnectSD(services_discovery_t *sd)
 	HtsMap map;
 	map.setData("method", "hello");
 	map.setData("clientname", "VLC media player");
-	map.setData("htspversion", 8);
+	map.setData("htspversion", HTSP_PROTO_VERSION);
 
 	HtsMessage m = ReadResult(sd, sys, map.makeMsg());
 	if(!m.isValid())

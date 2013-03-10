@@ -156,7 +156,7 @@ bool ConnectHTSP(demux_t *demux)
 	HtsMap map;
 	map.setData("method", "hello");
 	map.setData("clientname", "VLC media player");
-	map.setData("htspversion", 8);
+	map.setData("htspversion", HTSP_PROTO_VERSION);
 
 	HtsMessage m = ReadResult(demux, sys, map.makeMsg());
 	if(!m.isValid())
