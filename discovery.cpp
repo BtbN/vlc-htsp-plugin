@@ -176,10 +176,12 @@ bool GetChannels(services_discovery_t *sd)
 
 			std::string cname = m.getRoot()->getStr("channelName");
 			if(cname.empty())
-				continue;
+			{
+				std::ostringstream ss;
+				ss << "Channel " << cid;
+				cname = ss.str();
+			}
 
-			if(!m.getRoot()->contains("channelNumber"))
-				continue;
 			uint32_t cnum = m.getRoot()->getU32("channelNumber");
 
 			std::ostringstream oss;
