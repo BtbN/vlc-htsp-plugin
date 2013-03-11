@@ -36,16 +36,16 @@ extern const char *const cfg_options[];
 class HtsMessage;
 struct sys_common_t
 {
-	sys_common_t()
-		:netfd(-1)
-		,nextSeqNum(1)
-	{}
+    sys_common_t()
+        :netfd(-1)
+        ,nextSeqNum(1)
+    {}
 
-	virtual ~sys_common_t();
+    virtual ~sys_common_t();
 
-	int netfd;
-	uint32_t nextSeqNum;
-	std::deque<HtsMessage> queue;
+    int netfd;
+    uint32_t nextSeqNum;
+    std::deque<HtsMessage> queue;
 };
 
 bool TransmitMessageEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m);

@@ -29,156 +29,156 @@
 
 sys_common_t::~sys_common_t()
 {
-	if(netfd >= 0)
-		net_Close(netfd);
+    if(netfd >= 0)
+        net_Close(netfd);
 }
 
 uint32_t HTSPNextSeqNum(sys_common_t *sys)
 {
-	uint32_t res = sys->nextSeqNum++;
-	if(sys->nextSeqNum > 2147483647)
-		sys->nextSeqNum = 1;
-	return res;
+    uint32_t res = sys->nextSeqNum++;
+    if(sys->nextSeqNum > 2147483647)
+        sys->nextSeqNum = 1;
+    return res;
 }
 
 bool TransmitMessageEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m)
 {
-	if(sys->netfd < 0)
-	{
-		msg_Dbg(obj, "Invalid netfd in TransmitMessage");
-		return false;
-	}
+    if(sys->netfd < 0)
+    {
+        msg_Dbg(obj, "Invalid netfd in TransmitMessage");
+        return false;
+    }
 
-	void *buf;
-	uint32_t len;
+    void *buf;
+    uint32_t len;
 
-	if(!m.Serialize(&len, &buf))
-	{
-		msg_Dbg(obj, "Serialising message failed");
-		return false;
-	}
+    if(!m.Serialize(&len, &buf))
+    {
+        msg_Dbg(obj, "Serialising message failed");
+        return false;
+    }
 
-	if(net_Write(obj, sys->netfd, NULL, buf, len) != (ssize_t)len)
-	{
-		msg_Dbg(obj, "net_Write failed");
-		return false;
-	}
+    if(net_Write(obj, sys->netfd, NULL, buf, len) != (ssize_t)len)
+    {
+        msg_Dbg(obj, "net_Write failed");
+        return false;
+    }
 
-	free(buf);
+    free(buf);
 
-	return true;
+    return true;
 }
 
 HtsMessage ReadMessageEx(vlc_object_t *obj, sys_common_t *sys)
 {
-	char *buf;
-	uint32_t len;
-	ssize_t readSize;
+    char *buf;
+    uint32_t len;
+    ssize_t readSize;
 
-	if(sys->queue.size())
-	{
-		HtsMessage res = sys->queue.front();
-		sys->queue.pop_front();
-		return res;
-	}
+    if(sys->queue.size())
+    {
+        HtsMessage res = sys->queue.front();
+        sys->queue.pop_front();
+        return res;
+    }
 
-	if((readSize = net_Read(obj, sys->netfd, NULL, &len, sizeof(len), true)) != sizeof(len))
-	{
-		if(readSize == 0)
-		{
-			msg_Err(obj, "Size Read EOF!");
-			return HtsMessage();
-		}
+    if((readSize = net_Read(obj, sys->netfd, NULL, &len, sizeof(len), true)) != sizeof(len))
+    {
+        if(readSize == 0)
+        {
+            msg_Err(obj, "Size Read EOF!");
+            return HtsMessage();
+        }
 
-		msg_Err(obj, "Error reading size: %m");
-		return HtsMessage();
-	}
+        msg_Err(obj, "Error reading size: %m");
+        return HtsMessage();
+    }
 
-	len = ntohl(len);
-	if(len == 0)
-		return HtsMessage();
+    len = ntohl(len);
+    if(len == 0)
+        return HtsMessage();
 
-	buf = (char*)malloc(len);
+    buf = (char*)malloc(len);
 
-	if((readSize = net_Read(obj, sys->netfd, NULL, buf, len, true)) != len)
-	{
-		if(readSize == 0)
-		{
-			msg_Err(obj, "Data Read EOF!");
-			return HtsMessage();
-		}
+    if((readSize = net_Read(obj, sys->netfd, NULL, buf, len, true)) != len)
+    {
+        if(readSize == 0)
+        {
+            msg_Err(obj, "Data Read EOF!");
+            return HtsMessage();
+        }
 
-		msg_Err(obj, "Error reading data: %m");
-		return HtsMessage();
-	}
+        msg_Err(obj, "Error reading data: %m");
+        return HtsMessage();
+    }
 
-	HtsMessage result = HtsMessage::Deserialize(len, buf);
-	free(buf);
-	return result;
+    HtsMessage result = HtsMessage::Deserialize(len, buf);
+    free(buf);
+    return result;
 }
 
 HtsMessage ReadResultEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m, bool sequence)
 {
-	uint32_t iSequence = 0;
-	if(sequence)
-	{
-		iSequence = HTSPNextSeqNum(sys);
-		m.getRoot()->setData("seq", iSequence);
-	}
+    uint32_t iSequence = 0;
+    if(sequence)
+    {
+        iSequence = HTSPNextSeqNum(sys);
+        m.getRoot()->setData("seq", iSequence);
+    }
 
-	if(!TransmitMessageEx(obj, sys, m))
-	{
-		msg_Err(obj, "TransmitMessage failed!");
-		return HtsMessage();
-	}
+    if(!TransmitMessageEx(obj, sys, m))
+    {
+        msg_Err(obj, "TransmitMessage failed!");
+        return HtsMessage();
+    }
 
-	std::deque<HtsMessage> queue;
-	sys->queue.swap(queue);
+    std::deque<HtsMessage> queue;
+    sys->queue.swap(queue);
 
-	while((m = ReadMessageEx(obj, sys)).isValid())
-	{
-		if(!sequence)
-			break;
-		if(m.getRoot()->contains("seq") && m.getRoot()->getU32("seq") == iSequence)
-			break;
+    while((m = ReadMessageEx(obj, sys)).isValid())
+    {
+        if(!sequence)
+            break;
+        if(m.getRoot()->contains("seq") && m.getRoot()->getU32("seq") == iSequence)
+            break;
 
-		queue.push_back(m);
-		if(queue.size() >= MAX_QUEUE_SIZE)
-		{
-			msg_Err(obj, "Max queue size reached!");
-			sys->queue.swap(queue);
-			return HtsMessage();
-		}
-	}
+        queue.push_back(m);
+        if(queue.size() >= MAX_QUEUE_SIZE)
+        {
+            msg_Err(obj, "Max queue size reached!");
+            sys->queue.swap(queue);
+            return HtsMessage();
+        }
+    }
 
-	sys->queue.swap(queue);
+    sys->queue.swap(queue);
 
-	if(!m.isValid())
-	{
-		msg_Err(obj, "ReadMessage failed!");
-		return HtsMessage();
-	}
+    if(!m.isValid())
+    {
+        msg_Err(obj, "ReadMessage failed!");
+        return HtsMessage();
+    }
 
-	if(m.getRoot()->contains("error"))
-	{
-		msg_Err(obj, "HTSP Error: %s", m.getRoot()->getStr("error").c_str());
-		return HtsMessage();
-	}
-	if(m.getRoot()->getU32("noaccess") != 0)
-	{
-		msg_Err(obj, "Access Denied");
-		return HtsMessage();
-	}
+    if(m.getRoot()->contains("error"))
+    {
+        msg_Err(obj, "HTSP Error: %s", m.getRoot()->getStr("error").c_str());
+        return HtsMessage();
+    }
+    if(m.getRoot()->getU32("noaccess") != 0)
+    {
+        msg_Err(obj, "Access Denied");
+        return HtsMessage();
+    }
 
-	return m;
+    return m;
 }
 
 bool ReadSuccessEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m, const std::string &action, bool sequence)
 {
-	if(!ReadResultEx(obj, sys, m, sequence).isValid())
-	{
-		msg_Err(obj, "ReadSuccess - failed to %s", action.c_str());
-		return false;
-	}
-	return true;
+    if(!ReadResultEx(obj, sys, m, sequence).isValid())
+    {
+        msg_Err(obj, "ReadSuccess - failed to %s", action.c_str());
+        return false;
+    }
+    return true;
 }
