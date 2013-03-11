@@ -23,6 +23,7 @@
 #include <vlc_network.h>
 #include <vlc_services_discovery.h>
 
+#include <functional>
 #include <unordered_map>
 #include <sstream>
 
@@ -38,6 +39,7 @@ struct tmp_channel
 	uint32_t cnum;
 	std::string url;
 	input_item_t *item;
+	std::list<std::string> tags;
 };
 
 struct services_discovery_sys_t : public sys_common_t
@@ -140,13 +142,6 @@ bool ConnectSD(services_discovery_t *sd)
 	return res;
 }
 
-bool compare_tmp_channel(tmp_channel first, tmp_channel second)
-{
-	if(first.cnum < second.cnum)
-		return true;
-	return false;
-}
-
 bool GetChannels(services_discovery_t *sd)
 {
 	services_discovery_sys_t *sys = sd->p_sys;
@@ -156,7 +151,8 @@ bool GetChannels(services_discovery_t *sd)
 	if(!ReadSuccess(sd, sys, map.makeMsg(), "enable async metadata"))
 		return false;
 
-	std::list<tmp_channel> channels;
+	std::list<uint32_t> channelIds;
+	std::unordered_map<uint32_t, tmp_channel> channels;
 
 	HtsMessage m;
 	while((m = ReadMessage(sd, sys)).isValid())
@@ -202,27 +198,42 @@ bool GetChannels(services_discovery_t *sd)
 				port = 9982;
 			oss << host << ":" << port << "/" << cid;
 
-			tmp_channel ch;
-			ch.name = cname;
-			ch.cid = cid;
-			ch.cnum = cnum;
-			ch.url = oss.str();
-			channels.push_back(ch);
+			channels[cid].name = cname;
+			channels[cid].cid = cid;
+			channels[cid].cnum = cnum;
+			channels[cid].url = oss.str();
+
+			channelIds.push_back(cid);
+		}
+		else if(method == "tagAdd" || method == "tagUpdate")
+		{
+			if(!m.getRoot()->contains("tagId") || !m.getRoot()->contains("tagName"))
+				continue;
+
+			std::string tagName = m.getRoot()->getStr("tagName");
+
+			std::shared_ptr<HtsList> chList = m.getRoot()->getList("members");
+			for(uint32_t i = 0; i < chList->count(); ++i)
+				channels[chList->getData(i)->getU32()].tags.push_back(tagName);
 		}
 	}
 
-	channels.sort(compare_tmp_channel);
+	channelIds.sort([&](const uint32_t &first, const uint32_t &second) {
+		return channels[first].cnum < channels[second].cnum;
+	});
 
-	while(channels.size() > 0)
+	while(channelIds.size() > 0)
 	{
-		tmp_channel ch = channels.front();
-		channels.pop_front();
+		tmp_channel ch = channels[channelIds.front()];
+		channelIds.pop_front();
 
 		ch.item = input_item_New(ch.url.c_str(), ch.name.c_str());
 		if(unlikely(ch.item == 0))
 			return false;
 
-		services_discovery_AddItem(sd, ch.item, "Channels");
+		services_discovery_AddItem(sd, ch.item, "All Channels");
+		for(std::string tag: ch.tags)
+			services_discovery_AddItem(sd, ch.item, tag.c_str());
 
 		sys->channelMap[ch.cid] = ch;
 	}
