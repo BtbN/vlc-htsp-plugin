@@ -231,9 +231,12 @@ bool GetChannels(services_discovery_t *sd)
 		if(unlikely(ch.item == 0))
 			return false;
 
-		services_discovery_AddItem(sd, ch.item, "All Channels");
+		ch.item->i_type = ITEM_TYPE_NET;
 		for(std::string tag: ch.tags)
 			services_discovery_AddItem(sd, ch.item, tag.c_str());
+
+		services_discovery_AddItem(sd, ch.item, "All Channels");
+
 
 		sys->channelMap[ch.cid] = ch;
 	}
