@@ -25,8 +25,10 @@
 #include <vlc_network.h>
 #include <vlc_epg.h>
 #include <vlc_meta.h>
+#include <vlc_input.h>
 
 #include <ctime>
+#include <climits>
 #include <queue>
 #include <atomic>
 
@@ -73,7 +75,7 @@ struct demux_sys_t : public sys_common_t
         ,hadIFrame(false)
         ,drops(0)
         ,epg(0)
-        ,requestPause(-1)
+        ,requestSpeed(INT_MIN)
         ,requestSeek(-1)
     {
         vlc_mutex_init(&queueMutex);
@@ -129,11 +131,11 @@ struct demux_sys_t : public sys_common_t
     vlc_cond_t queueCond;
     vlc_thread_t thread;
     std::queue<HtsMessage> msgQueue;
-    std::atomic<int> requestPause;
+    std::atomic<int> requestSpeed;
     std::atomic<int64_t> requestSeek;
 };
 
-int PauseHTSP(demux_t *demux, bool state);
+int SpeedHTSP(demux_t *demux, int state);
 int SeekHTSP(demux_t *demux, int64_t time, bool precise);
 void * RunHTSP(void *obj);
 
@@ -393,6 +395,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
 
     bool tb = false;
     int64_t ti = 0;
+    int tint = 0;
     double td = 0.0d;
     double totalTime = sys->tsEnd - sys->tsStart;
 
@@ -400,6 +403,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
     {
         case DEMUX_CAN_PAUSE:
         case DEMUX_CAN_SEEK:
+        case DEMUX_CAN_CONTROL_RATE:
             *va_arg(args, bool*) = (sys->timeshiftPeriod > 0);
             return VLC_SUCCESS;
         case DEMUX_CAN_CONTROL_PACE:
@@ -410,7 +414,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
             if(sys->timeshiftPeriod <= 0)
                 return VLC_EGENERIC;
             tb = (bool)va_arg(args, int);
-            return PauseHTSP(demux, tb);
+            return SpeedHTSP(demux, (tb?0:100));
         case DEMUX_SET_TIME:
             msg_Dbg(demux, "SET_TIME Queried");
             if(sys->timeshiftPeriod <= 0)
@@ -418,6 +422,14 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
             ti = va_arg(args, int64_t) + sys->tsStart;
             tb = (bool)va_arg(args, int);
             return SeekHTSP(demux, ti, tb);
+        case DEMUX_SET_RATE:
+            msg_Dbg(demux, "SET_RATE Queried");
+            if(sys->timeshiftPeriod <= 0)
+                return VLC_EGENERIC;
+            tint = *va_arg(args, int*);
+            tint = (100 * INPUT_RATE_DEFAULT) / tint;
+            msg_Dbg(demux, "Rate queried to value of %d", tint);
+            return SpeedHTSP(demux, tint);
         case DEMUX_GET_LENGTH:
             if(sys->currentPcr == 0 || sys->timeshiftPeriod <= 0)
                 return VLC_EGENERIC;
@@ -496,16 +508,16 @@ void * RunHTSP(void *obj)
             vlc_mutex_unlock(&sys->queueMutex);
         }
 
-        if(sys->requestPause >= 0)
+        if(sys->requestSpeed != INT_MIN)
         {
             HtsMap map;
             map.setData("method", "subscriptionSpeed");
             map.setData("subscriptionId", 1);
-            map.setData("speed", (int)sys->requestPause);
+            map.setData("speed", (int)sys->requestSpeed);
 
             ReadSuccess(demux, sys, map.makeMsg(), "set speed");
 
-            sys->requestPause = -1;
+            sys->requestSpeed = INT_MIN;
         }
 
         if(sys->requestSeek >= 0)
@@ -541,16 +553,16 @@ int SeekHTSP(demux_t *demux, int64_t time, bool precise)
     return VLC_SUCCESS;
 }
 
-int PauseHTSP(demux_t *demux, bool state)
+int SpeedHTSP(demux_t *demux, int speed)
 {
     demux_sys_t *sys = demux->p_sys;
     if(sys->timeshiftPeriod == 0)
         return VLC_EGENERIC;
 
-    if(sys->requestPause >= 0)
+    if(sys->requestSpeed != INT_MIN)
         return VLC_EGENERIC;
 
-    sys->requestPause = (state?0:100);
+    sys->requestSpeed = speed;
 
     return VLC_SUCCESS;
 }
@@ -882,6 +894,13 @@ bool ParseSubscriptionSkip(demux_t *demux, HtsMessage &msg)
     return true;
 }
 
+int ParseSubscriptionSpeed(demux_t *demux, HtsMessage &msg)
+{
+    VLC_UNUSED(demux);
+    VLC_UNUSED(msg);
+    return true;
+}
+
 int DemuxHTSP(demux_t *demux)
 {
     demux_sys_t *sys = demux->p_sys;
@@ -953,6 +972,13 @@ int DemuxHTSP(demux_t *demux)
     else if(method == "subscriptionSkip")
     {
         if(!ParseSubscriptionSkip(demux, msg))
+        {
+            return DEMUX_ERROR;
+        }
+    }
+    else if(method == "subscriptionSpeed")
+    {
+        if(!ParseSubscriptionSpeed(demux, msg))
         {
             return DEMUX_ERROR;
         }
