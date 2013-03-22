@@ -45,6 +45,7 @@ struct tmp_channel
 struct services_discovery_sys_t : public sys_common_t
 {
     services_discovery_sys_t()
+        :thread(0)
     {}
 
     vlc_thread_t thread;
@@ -300,8 +301,12 @@ void CloseSD(vlc_object_t *obj)
     if(!sys)
         return;
 
-    vlc_cancel(sys->thread);
-    vlc_join(sys->thread, 0);
+    if(sys->thread)
+    {
+        vlc_cancel(sys->thread);
+        vlc_join(sys->thread, 0);
+        sys->thread = 0;
+    }
 
     delete sys;
     sys = sd->p_sys = 0;
