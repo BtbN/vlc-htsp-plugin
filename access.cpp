@@ -501,9 +501,6 @@ void * RunHTSP(void *obj)
         if(method == "timeshiftStatus" && subs == 1)
         {
             ParseTimeshiftStatus(demux, msg);
-            vlc_mutex_lock(&sys->queueMutex);
-            msg_Dbg(demux, "Current queue size: %lld", (long long int)sys->msgQueue.size());
-            vlc_mutex_unlock(&sys->queueMutex);
         }
         else
         {
@@ -755,8 +752,6 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
     demux_sys_t *sys = demux->p_sys;
 
     uint32_t index = msg.getRoot()->getU32("stream");
-
-    sys->tsOffset = msg.getRoot()->getS64("timeshift");
 
     void *bin = 0;
     uint32_t binlen = 0;
