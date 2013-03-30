@@ -94,14 +94,14 @@ bool ConnectSD(services_discovery_t *sd)
     uint32_t protoVersion = m.getRoot()->getU32("htspversion");
 
     msg_Info(sd, "Connected to HTSP Server %s, version %s, protocol %d", serverName.c_str(), serverVersion.c_str(), protoVersion);
-        if(protoVersion < HTSP_PROTO_VERSION)
-        {
-            msg_Warn(sd, "TVHeadend is running an older version of HTSP(v%d) than we are(v%d). No effort was made to keep compatible with older versions, update tvh before reporting problems!", protoVersion, HTSP_PROTO_VERSION);
-        }
-        else if(protoVersion > HTSP_PROTO_VERSION)
-        {
-            msg_Info(sd, "TVHeadend is running a more recent version of HTSP(v%d) than we are(v%d). Check if there is an update available!", protoVersion, HTSP_PROTO_VERSION);
-        }
+    if(protoVersion < HTSP_PROTO_VERSION)
+    {
+        msg_Warn(sd, "TVHeadend is running an older version of HTSP(v%d) than we are(v%d). No effort was made to keep compatible with older versions, update tvh before reporting problems!", protoVersion, HTSP_PROTO_VERSION);
+    }
+    else if(protoVersion > HTSP_PROTO_VERSION)
+    {
+        msg_Info(sd, "TVHeadend is running a more recent version of HTSP(v%d) than we are(v%d). Check if there is an update available!", protoVersion, HTSP_PROTO_VERSION);
+    }
 
     const char *user = var_GetString(sd, CFG_PREFIX"user");
     const char *pass = var_GetString(sd, CFG_PREFIX"pass");

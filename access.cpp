@@ -177,14 +177,14 @@ bool ConnectHTSP(demux_t *demux)
     m.getRoot()->getBin("challenge", &chall_len, &chall);
 
     msg_Info(demux, "Connected to HTSP Server %s, version %s, protocol %d", sys->serverName.c_str(), sys->serverVersion.c_str(), sys->protoVersion);
-        if(sys->protoVersion < HTSP_PROTO_VERSION)
-        {
-            msg_Warn(demux, "TVHeadend is running an older version of HTSP(v%d) than we are(v%d). No effort was made to keep compatible with older versions, update tvh before reporting problems!", sys->protoVersion, HTSP_PROTO_VERSION);
-        }
-        else if(sys->protoVersion > HTSP_PROTO_VERSION)
-        {
-            msg_Info(demux, "TVHeadend is running a more recent version of HTSP(v%d) than we are(v%d). Check if there is an update available!", sys->protoVersion, HTSP_PROTO_VERSION);
-        }
+    if(sys->protoVersion < HTSP_PROTO_VERSION)
+    {
+        msg_Warn(demux, "TVHeadend is running an older version of HTSP(v%d) than we are(v%d). No effort was made to keep compatible with older versions, update tvh before reporting problems!", sys->protoVersion, HTSP_PROTO_VERSION);
+    }
+    else if(sys->protoVersion > HTSP_PROTO_VERSION)
+    {
+        msg_Info(demux, "TVHeadend is running a more recent version of HTSP(v%d) than we are(v%d). Check if there is an update available!", sys->protoVersion, HTSP_PROTO_VERSION);
+    }
 
     if(sys->username.empty())
         return true;
