@@ -103,8 +103,8 @@ bool ConnectSD(services_discovery_t *sd)
         msg_Info(sd, "TVHeadend is running a more recent version of HTSP(v%d) than we are(v%d). Check if there is an update available!", protoVersion, HTSP_PROTO_VERSION);
     }
 
-    const char *user = var_GetString(sd, CFG_PREFIX"user");
-    const char *pass = var_GetString(sd, CFG_PREFIX"pass");
+    char *user = var_GetString(sd, CFG_PREFIX"user");
+    char *pass = var_GetString(sd, CFG_PREFIX"pass");
     if(user == 0 || user[0] == 0)
         return true;
 
