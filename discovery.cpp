@@ -132,6 +132,10 @@ bool ConnectSD(services_discovery_t *sd)
     else
         msg_Info(sd, "Authenticating as '%s' without a password", user);
 
+    if(user)
+        free(user);
+    if(pass)
+        free(pass);
     if(chall)
         free(chall);
 
