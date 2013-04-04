@@ -3,17 +3,19 @@ LD = ld
 CC = gcc
 CXX = g++
 INSTALL = install
-CFLAGS = -pipe -O2 -Wall -Wextra -std=gnu99 -I. -ggdb
-CXXFLAGS = -pipe -O2 -Wall -Wextra -std=gnu++0x -I. -ggdb
+CFLAGS = -pipe -O2 -Wall -Wextra -std=gnu99 -I. -g
+CXXFLAGS = -pipe -O2 -Wall -Wextra -std=gnu++0x -I. -g
 LDFLAGS = -Wl,-no-undefined,-z,defs
 VLC_PLUGIN_CFLAGS := $(shell pkg-config --cflags vlc-plugin)
 VLC_PLUGIN_LIBS := $(shell pkg-config --libs vlc-plugin)
+VLC_PLUGIN_MAJOR := $(shell pkg-config --modversion vlc-plugin | cut -d . -f 1)
+VLC_PLUGIN_MINOR := $(shell pkg-config --modversion vlc-plugin | cut -d . -f 2)
 
 libdir = $(PREFIX)/lib
 plugindir = $(libdir)/vlc/plugins
 
-override CFLAGS += -DMODULE_STRING=\"htsp\"
-override CXXFLAGS += -DMODULE_STRING=\"htsp\"
+override CFLAGS += -DMODULE_STRING=\"htsp\" -DVLC_PLUGIN_MAJOR=$(VLC_PLUGIN_MAJOR) -DVLC_PLUGIN_MINOR=$(VLC_PLUGIN_MINOR)
+override CXXFLAGS += -DMODULE_STRING=\"htsp\" -DVLC_PLUGIN_MAJOR=$(VLC_PLUGIN_MAJOR) -DVLC_PLUGIN_MINOR=$(VLC_PLUGIN_MINOR)
 override OCFLAGS = $(CFLAGS)
 override OCXXFLAGS = $(CXXFLAGS)
 override CFLAGS += $(VLC_PLUGIN_CFLAGS)

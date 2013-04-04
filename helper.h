@@ -58,4 +58,9 @@ bool ReadSuccessEx(vlc_object_t *obj, sys_common_t *sys, HtsMessage m, const std
 #define ReadResult(a, b, c) ReadResultEx(VLC_OBJECT(a), b, c)
 #define ReadSuccess(a, b, c, d) ReadSuccessEx(VLC_OBJECT(a), b, c, d)
 
+#define CHECK_VLC_VERSION(major, minor) \
+        (VLC_PLUGIN_MAJOR > (major) || \
+         (VLC_PLUGIN_MAJOR == (major) && VLC_PLUGIN_MINOR >= (minor)))
+
+
 #endif
