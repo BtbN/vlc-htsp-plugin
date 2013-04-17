@@ -29,7 +29,7 @@
 #define MAX_QUEUE_SIZE 1000
 #define READ_TIMEOUT 10
 
-#define HTSP_PROTO_VERSION 9
+#define HTSP_PROTO_VERSION 10
 
 extern const char *const cfg_options[];
 
