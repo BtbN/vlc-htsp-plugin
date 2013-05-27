@@ -35,6 +35,7 @@ vlc_module_begin ()
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
     set_callbacks( OpenHTSP, CloseHTSP )
+    add_bool( CFG_PREFIX"video-only", false, "Video Only", "Discards all video streams, if the server supports it.", false )
     add_shortcut( "hts", "htsp" )
 
     add_submodule()

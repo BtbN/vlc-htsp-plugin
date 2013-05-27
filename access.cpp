@@ -67,6 +67,7 @@ struct demux_sys_t : public sys_common_t
         ,timeshiftPeriod(0)
         ,streamCount(0)
         ,stream(0)
+        ,videoOnly(false)
         ,host("")
         ,port(0)
         ,username("")
@@ -78,9 +79,11 @@ struct demux_sys_t : public sys_common_t
         ,thread(0)
         ,requestSpeed(INT_MIN)
         ,requestSeek(-1)
+        ,doDisable(false)
     {
         vlc_mutex_init(&queueMutex);
         vlc_cond_init(&queueCond);
+        vlc_mutex_init(&disableMutex);
     }
 
     ~demux_sys_t()
@@ -92,6 +95,7 @@ struct demux_sys_t : public sys_common_t
 
         vlc_mutex_destroy(&queueMutex);
         vlc_cond_destroy(&queueCond);
+        vlc_mutex_destroy(&disableMutex);
 
         if(epg)
             vlc_epg_Delete(epg);
@@ -109,6 +113,8 @@ struct demux_sys_t : public sys_common_t
 
     uint32_t streamCount;
     hts_stream *stream;
+
+	bool videoOnly;
 
     vlc_url_t url;
 
@@ -134,6 +140,10 @@ struct demux_sys_t : public sys_common_t
     std::queue<HtsMessage> msgQueue;
     std::atomic<int> requestSpeed;
     std::atomic<int64_t> requestSeek;
+
+    std::atomic<bool> doDisable;
+    vlc_mutex_t disableMutex;
+    std::list<int64_t> disables;
 };
 
 int SpeedHTSP(demux_t *demux, int state);
@@ -339,6 +349,8 @@ int OpenHTSP(vlc_object_t *obj)
     demux->pf_demux = DemuxHTSP;
     demux->pf_control = ControlHTSP;
 
+    sys->videoOnly = var_InheritBool(demux, CFG_PREFIX"video-only");
+
     msg_Info(demux, "HTSP plugin loading...");
 
     if(!parseURL(demux))
@@ -486,6 +498,7 @@ void * RunHTSP(void *obj)
 {
     demux_t *demux = (demux_t*)obj;
     demux_sys_t *sys = demux->p_sys;
+    std::list<int64_t> oldDisable;
 
     for(;;)
     {
@@ -538,6 +551,33 @@ void * RunHTSP(void *obj)
 
             sys->requestSeek = -1;
         }
+
+        if(sys->doDisable)
+        {
+            vlc_mutex_lock(&sys->disableMutex);
+
+            std::shared_ptr<HtsList> enable = std::make_shared<HtsList>();
+            for(auto it = oldDisable.begin(); it != oldDisable.end(); ++it)
+                enable->appendData(std::make_shared<HtsInt>(*it));
+
+            std::shared_ptr<HtsList> disable = std::make_shared<HtsList>();;
+
+            for(auto it = sys->disables.begin(); it != sys->disables.end(); ++it)
+                disable->appendData(std::make_shared<HtsInt>(*it));
+
+            HtsMap map;
+            map.setData("method", "subscriptionFilterStream");
+            map.setData("subscriptionId", 1);
+            map.setData("enable", enable);
+            map.setData("disable", disable);
+
+            if(!oldDisable.empty() || !sys->disables.empty())
+                ReadSuccess(demux, sys, map.makeMsg(), "filterStream");
+
+            sys->doDisable = false;
+            oldDisable = sys->disables;
+            vlc_mutex_unlock(&sys->disableMutex);
+        }
     }
 
     return 0;
@@ -580,7 +620,8 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
     if(sys->stream != 0)
     {
         for(uint32_t i = 0; i < sys->streamCount; i++)
-            es_out_Del(demux->out, sys->stream[i].es);
+            if(sys->stream[i].es != 0)
+                es_out_Del(demux->out, sys->stream[i].es);
         delete[] sys->stream;
         sys->stream = 0;
         sys->streamCount = 0;
@@ -615,6 +656,9 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
     sys->lastPcr = 0;
     sys->currentPcr = 0;
     sys->tsOffset = 0;
+
+    vlc_mutex_lock(&sys->disableMutex);
+    sys->disables.clear();
 
     for(uint32_t jj = 0; jj < streams->count(); jj++)
     {
@@ -682,6 +726,13 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
         if(fmt->i_cat == VIDEO_ES)
         {
+            if(sys->videoOnly)
+            {
+                sys->stream[i].es = 0;
+                sys->disables.push_back(index);
+                continue;
+            }
+
             fmt->video.i_width = map->getU32("width");
             fmt->video.i_height = map->getU32("height");
         }
@@ -705,6 +756,9 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
         msg_Dbg(demux, "Found elementary stream id %d, type %s", index, type.c_str());
     }
+
+    sys->doDisable = true;
+    vlc_mutex_unlock(&sys->disableMutex);
 
     return true;
 }
@@ -756,6 +810,17 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
     demux_sys_t *sys = demux->p_sys;
 
     uint32_t index = msg.getRoot()->getU32("stream");
+
+    vlc_mutex_lock(&sys->disableMutex);
+    for(auto it = sys->disables.begin(); it != sys->disables.end(); ++it)
+    {
+        if(*it == index)
+        {
+            vlc_mutex_unlock(&sys->disableMutex);
+            return true;
+        }
+    }
+    vlc_mutex_unlock(&sys->disableMutex);
 
     void *bin = 0;
     uint32_t binlen = 0;
