@@ -56,16 +56,19 @@ bool ConnectSD(services_discovery_t *sd)
 {
     services_discovery_sys_t *sys = sd->p_sys;
 
-    const char *host = var_GetString(sd, CFG_PREFIX"host");
+    char *host = var_GetString(sd, CFG_PREFIX"host");
     int port = var_GetInteger(sd, CFG_PREFIX"port");
-
-    if(host == 0 || host[0] == 0)
-        host = "localhost";
 
     if(port == 0)
         port = 9982;
 
-    sys->netfd = net_ConnectTCP(sd, host, port);
+    if(host == 0 || host[0] == 0)
+        sys->netfd = net_ConnectTCP(sd, "localhost", port);
+    else
+        sys->netfd = net_ConnectTCP(sd, host, port);
+
+    if(host)
+        free(host);
 
     if(sys->netfd < 0)
     {
