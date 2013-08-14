@@ -82,11 +82,25 @@ HtsMessage ReadMessageEx(vlc_object_t *obj, sys_common_t *sys)
         return res;
     }
 
+    if(sys->netfd < 0)
+    {
+        msg_Dbg(obj, "ReadMessage on closed netfd");
+        return HtsMessage();
+    }
+
     if((readSize = net_Read(obj, sys->netfd, NULL, &len, sizeof(len), true)) != sizeof(len))
     {
-        if(readSize == 0)
+        net_Close(sys->netfd);
+        sys->netfd = -1;
+
+        if(readSize <= 0)
         {
             msg_Err(obj, "Size Read EOF!");
+            return HtsMessage();
+        }
+        else if(readSize < 0)
+        {
+            msg_Err(obj, "Data Read ERROR!");
             return HtsMessage();
         }
 
@@ -102,9 +116,17 @@ HtsMessage ReadMessageEx(vlc_object_t *obj, sys_common_t *sys)
 
     if((readSize = net_Read(obj, sys->netfd, NULL, buf, len, true)) != len)
     {
+        net_Close(sys->netfd);
+        sys->netfd = -1;
+
         if(readSize == 0)
         {
             msg_Err(obj, "Data Read EOF!");
+            return HtsMessage();
+        }
+        else if(readSize < 0)
+        {
+            msg_Err(obj, "Data Read ERROR!");
             return HtsMessage();
         }
 

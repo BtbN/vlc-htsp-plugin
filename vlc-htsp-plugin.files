@@ -1,0 +1,12 @@
+Makefile
+access.cpp
+access.h
+discovery.cpp
+discovery.h
+helper.cpp
+helper.h
+htsmessage.cpp
+htsmessage.h
+sha1.c
+sha1.h
+vlc-htsp-plugin.cpp

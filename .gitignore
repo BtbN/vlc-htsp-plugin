@@ -1,5 +1,6 @@
 libhts/*.o
 libhts/*.a
+*.creator.user
 *.o
 *.so
 win32/sdk/
