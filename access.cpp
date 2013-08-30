@@ -292,6 +292,66 @@ bool SubscribeHTSP(demux_t *demux)
     map.setData("timeshiftPeriod", (uint32_t)~0);
     map.setData("normts", 1);
 
+    if(var_InheritBool(demux, CFG_PREFIX"transcode"))
+    {
+        char *s;
+        int64_t i;
+
+        s = var_InheritString(demux, CFG_PREFIX"vcodec");
+        if(s && *s)
+            map.setData("videoCodec", s);
+        if(s)
+            free(s);
+
+        s = var_InheritString(demux, CFG_PREFIX"vextra");
+        if(s && *s)
+            map.setData("videoExtra", s);
+        if(s)
+            free(s);
+
+        s = var_InheritString(demux, CFG_PREFIX"acodec");
+        if(s && *s)
+            map.setData("audioCodec", s);
+        if(s)
+            free(s);
+
+        s = var_InheritString(demux, CFG_PREFIX"aextra");
+        if(s && *s)
+            map.setData("audioExtra", s);
+        if(s)
+            free(s);
+
+        s = var_InheritString(demux, CFG_PREFIX"scodec");
+        if(s && *s)
+            map.setData("subtitleCodec", s);
+        if(s)
+            free(s);
+
+        s = var_InheritString(demux, CFG_PREFIX"sextra");
+        if(s && *s)
+            map.setData("subtitleExtra", s);
+        if(s)
+            free(s);
+
+        s = var_InheritString(demux, CFG_PREFIX"tlanguage");
+        if(s && *s)
+            map.setData("language", s);
+        if(s)
+            free(s);
+
+        i = var_InheritInteger(demux, CFG_PREFIX"tresolution");
+        if(i)
+            map.setData("maxResolution", i);
+
+        i = var_InheritInteger(demux, CFG_PREFIX"tchannels");
+        if(i)
+            map.setData("channels", i);
+
+        i = var_InheritInteger(demux, CFG_PREFIX"tbandwidth");
+        if(i)
+            map.setData("bandwidth", i);
+    }
+
     HtsMessage res = ReadResult(demux, sys, map.makeMsg());
     if(!res.isValid())
         return false;
