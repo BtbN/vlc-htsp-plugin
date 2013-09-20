@@ -1,0 +1,10 @@
+language: cpp
+compiler:
+  - gcc
+  - clang
+  
+before_script:
+  - sudo apt-get install libvlc-dev libvlccore-dev
+  
+script:
+  - make CC="$CC" CXX="$CXX"
