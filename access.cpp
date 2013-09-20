@@ -477,7 +477,7 @@ int ControlHTSP(demux_t *demux, int i_query, va_list args)
     bool tb = false;
     int64_t ti = 0;
     int tint = 0;
-    double td = 0.0d;
+    double td = 0.0;
     double totalTime = sys->tsEnd - sys->tsStart;
 
     switch(i_query)
