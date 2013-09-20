@@ -74,9 +74,13 @@ class HtsMap : public HtsData
     HtsMessage makeMsg();
 
     bool contains(const std::string &name);
+	using HtsData::getU32;
     uint32_t getU32(const std::string &name);
+	using HtsData::getS64;
     int64_t getS64(const std::string &name);
+	using HtsData::getStr;
     const std::string &getStr(const std::string &name);
+	using HtsData::getBin;
     void getBin(const std::string &name, uint32_t *len, void **buf);
     std::shared_ptr<HtsList> getList(const std::string &name);
     std::shared_ptr<HtsMap> getMap(const std::string &name);
