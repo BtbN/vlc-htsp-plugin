@@ -93,7 +93,7 @@ HtsMessage ReadMessageEx(vlc_object_t *obj, sys_common_t *sys)
         net_Close(sys->netfd);
         sys->netfd = -1;
 
-        if(readSize <= 0)
+        if(readSize == 0)
         {
             msg_Err(obj, "Size Read EOF!");
             return HtsMessage();
@@ -114,7 +114,7 @@ HtsMessage ReadMessageEx(vlc_object_t *obj, sys_common_t *sys)
 
     buf = (char*)malloc(len);
 
-    if((readSize = net_Read(obj, sys->netfd, NULL, buf, len, true)) != len)
+    if((readSize = net_Read(obj, sys->netfd, NULL, buf, len, true)) != (ssize_t)len)
     {
         net_Close(sys->netfd);
         sys->netfd = -1;
