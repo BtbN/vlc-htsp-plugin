@@ -67,7 +67,7 @@ struct demux_sys_t : public sys_common_t
         ,timeshiftPeriod(0)
         ,streamCount(0)
         ,stream(0)
-        ,videoOnly(false)
+        ,audioOnly(false)
         ,host("")
         ,port(0)
         ,username("")
@@ -114,7 +114,7 @@ struct demux_sys_t : public sys_common_t
     uint32_t streamCount;
     hts_stream *stream;
 
-	bool videoOnly;
+	bool audioOnly;
 
     vlc_url_t url;
 
@@ -409,7 +409,7 @@ int OpenHTSP(vlc_object_t *obj)
     demux->pf_demux = DemuxHTSP;
     demux->pf_control = ControlHTSP;
 
-    sys->videoOnly = var_InheritBool(demux, CFG_PREFIX"video-only");
+    sys->audioOnly = var_InheritBool(demux, CFG_PREFIX"audio-only");
 
     msg_Info(demux, "HTSP plugin loading...");
 
@@ -786,7 +786,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
         if(fmt->i_cat == VIDEO_ES)
         {
-            if(sys->videoOnly)
+            if(sys->audioOnly)
             {
                 sys->stream[i].es = 0;
                 sys->disables.push_back(index);
