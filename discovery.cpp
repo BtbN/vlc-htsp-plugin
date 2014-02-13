@@ -198,7 +198,8 @@ bool GetChannels(services_discovery_t *sd)
             else if(user != 0 && user[0] != 0)
                 oss << user << "@";
 
-            const char *host = var_GetString(sd, CFG_PREFIX"host");
+            char *_host = var_GetString(sd, CFG_PREFIX"host");
+            const char *host = _host;
             if(host == 0 || host[0] == 0)
                 host = "localhost";
             int port = var_GetInteger(sd, CFG_PREFIX"port");
@@ -212,6 +213,13 @@ bool GetChannels(services_discovery_t *sd)
             channels[cid].url = oss.str();
 
             channelIds.push_back(cid);
+            
+            if(user)
+                free(user);
+            if(pass)
+                free(pass);
+            if(_host)
+                free(_host);
         }
         else if(method == "tagAdd" || method == "tagUpdate")
         {
