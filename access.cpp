@@ -1038,6 +1038,8 @@ int DemuxHTSP(demux_t *demux)
 
     vlc_mutex_lock(&sys->queueMutex);
     if(sys->msgQueue.size() == 0)
+        vlc_cond_wait(&sys->queueCond, &sys->queueMutex);
+    if(sys->msgQueue.size() == 0)
     {
         vlc_mutex_unlock(&sys->queueMutex);
         return DEMUX_OK;
