@@ -189,7 +189,7 @@ bool GetChannels(services_discovery_t *sd)
 
             uint32_t cnum = m.getRoot()->getU32("channelNumber");
 
-			std::string cicon = m.getRoot()->getStr("channelIcon");
+	    std::string cicon = m.getRoot()->getStr("channelIcon");
 			
             std::ostringstream oss;
             oss << "htsp://";
@@ -213,7 +213,7 @@ bool GetChannels(services_discovery_t *sd)
             channels[cid].name = cname;
             channels[cid].cid = cid;
             channels[cid].cnum = cnum;
-			channels[cid].cicon = cicon;
+	    channels[cid].cicon = cicon;
             channels[cid].url = oss.str();
 
             channelIds.push_back(cid);
@@ -250,7 +250,8 @@ bool GetChannels(services_discovery_t *sd)
         ch.item = input_item_New(ch.url.c_str(), ch.name.c_str());
         if(unlikely(ch.item == 0))
             return false;
-		input_item_SetArtworkURL(ch.item, ch.cicon.c_str());
+	
+	input_item_SetArtworkURL(ch.item, ch.cicon.c_str());
 		
         ch.item->i_type = ITEM_TYPE_NET;
         for(std::string tag: ch.tags)
