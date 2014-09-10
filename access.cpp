@@ -47,12 +47,14 @@ struct hts_stream
         :es(0)
         ,lastDts(0)
         ,lastPts(0)
+        ,ignoreTime(false)
     {}
 
     es_out_id_t *es;
     es_format_t fmt;
     mtime_t lastDts;
     mtime_t lastPts;
+    bool ignoreTime;
 };
 
 struct demux_sys_t : public sys_common_t
@@ -114,7 +116,7 @@ struct demux_sys_t : public sys_common_t
     uint32_t streamCount;
     hts_stream *stream;
 
-	bool audioOnly;
+    bool audioOnly;
 
     vlc_url_t url;
 
@@ -769,18 +771,22 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
         else if(type == "DVBSUB")
         {
             es_format_Init(fmt, SPU_ES, VLC_CODEC_DVBS);
+            sys->stream[i].ignoreTime = true;
         }
         else if(type == "TEXTSUB")
         {
             es_format_Init(fmt, SPU_ES, VLC_CODEC_TEXT);
+            sys->stream[i].ignoreTime = true;
         }
         else if(type == "TELETEXT")
         {
             es_format_Init(fmt, SPU_ES, VLC_CODEC_TELETEXT);
+            sys->stream[i].ignoreTime = true;
         }
         else
         {
             sys->stream[i].es = 0;
+            sys->stream[i].ignoreTime = true;
             continue;
         }
 
@@ -940,9 +946,9 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
     if(duration != 0)
         block->i_length = duration;
 
-    if(pts > 0)
+    if(pts > 0 && !sys->stream[index - 1].ignoreTime)
         sys->stream[index - 1].lastPts = pts;
-    if(dts > 0)
+    if(dts > 0 && !sys->stream[index - 1].ignoreTime)
         sys->stream[index - 1].lastDts = dts;
 
     frametype = msg.getRoot()->getU32("frametype");
