@@ -56,7 +56,7 @@ libhtsp_plugin.so: $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o)
 	$(CC) -pipe -O2 -Wall -Wextra -std=gnu99 -I. -ggdb -Iwin32/include/vlc/plugins -DMODULE_STRING=\"htsp\" -DVLC_PLUGIN_MAJOR=$(VLC_PLUGIN_MAJOR) -DVLC_PLUGIN_MINOR=$(VLC_PLUGIN_MINOR) -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c $<
 
 %.ow: %.cpp
-	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -I. -ggdb -Iwin32/include/vlc/plugins -DMODULE_STRING=\"htsp\" -DVLC_PLUGIN_MAJOR=$(VLC_PLUGIN_MAJOR) -DVLC_PLUGIN_MINOR=$(VLC_PLUGIN_MINOR) -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -c $<
+	$(CXX) -pipe -O2 -Wall -Wextra -std=gnu++0x -I. -ggdb -Iwin32/include/vlc/plugins -DMODULE_STRING=\"htsp\" -DVLC_PLUGIN_MAJOR=$(VLC_PLUGIN_MAJOR) -DVLC_PLUGIN_MINOR=$(VLC_PLUGIN_MINOR) -D__PLUGIN__ -D_FILE_OFFSET_BITS=64 -D_REENTRANT -D_THREAD_SAFE -include winsock2.h -c $<
 
 win32: $(C_SOURCES:%.c=%.ow) $(CXX_SOURCES:%.cpp=%.ow)
 	$(CXX) -shared -static-libgcc -static -o libhtsp_plugin.dll $(C_SOURCES:%.c=%.o) $(CXX_SOURCES:%.cpp=%.o) win32/lib/libvlccore.lib -lws2_32 -lm
