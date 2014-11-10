@@ -5,7 +5,7 @@ CXX = g++
 INSTALL = install
 CFLAGS = -pipe -O2 -Wall -Wextra -std=gnu99 -I. -g
 CXXFLAGS = -pipe -O2 -Wall -Wextra -std=gnu++0x -I. -g
-LDFLAGS = -Wl,-no-undefined,-z,defs
+LDFLAGS = -Wl,-no-undefined,-z,defs -latomic
 VLC_PLUGIN_CFLAGS := $(shell pkg-config --cflags vlc-plugin)
 VLC_PLUGIN_LIBS := $(shell pkg-config --libs vlc-plugin)
 VLC_PLUGIN_MAJOR := $(shell pkg-config --modversion vlc-plugin | cut -d . -f 1)
