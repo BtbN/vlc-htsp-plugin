@@ -18,14 +18,14 @@
 
 #define __STDC_CONSTANT_MACROS 1
 
+#include <functional>
+#include <unordered_map>
+#include <sstream>
+
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_network.h>
 #include <vlc_services_discovery.h>
-
-#include <functional>
-#include <unordered_map>
-#include <sstream>
 
 #include "discovery.h"
 #include "helper.h"

@@ -18,6 +18,11 @@
 
 #define __STDC_CONSTANT_MACROS 1
 
+#include <ctime>
+#include <climits>
+#include <queue>
+#include <atomic>
+
 #include <vlc_common.h>
 #include <vlc_demux.h>
 #include <vlc_access.h>
@@ -26,11 +31,6 @@
 #include <vlc_epg.h>
 #include <vlc_meta.h>
 #include <vlc_input.h>
-
-#include <ctime>
-#include <climits>
-#include <queue>
-#include <atomic>
 
 #include "access.h"
 #include "helper.h"

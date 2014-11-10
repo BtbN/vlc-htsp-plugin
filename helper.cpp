@@ -18,10 +18,10 @@
 
 #define __STDC_CONSTANT_MACROS 1
 
+#include <ctime>
+
 #include <vlc_common.h>
 #include <vlc_network.h>
-
-#include <ctime>
 
 #include "helper.h"
 #include "htsmessage.h"
