@@ -5,7 +5,7 @@ compiler:
   
 before_script:
   - sudo apt-get update
-  - sudo apt-get install libvlc-dev libvlccore-dev
+  - sudo apt-get install libvlc-dev libvlccore-dev libgcc-4.8-dev
   
 script:
   - make CC="$CC" CXX="$CXX"
