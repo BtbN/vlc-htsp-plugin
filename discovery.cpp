@@ -47,10 +47,12 @@ struct services_discovery_sys_t : public sys_common_t
 {
     services_discovery_sys_t()
         :thread(0)
+        ,disconnect(false)
     {}
 
     vlc_thread_t thread;
     std::unordered_map<uint32_t, tmp_channel> channelMap;
+	bool disconnect;
 };
 
 bool ConnectSD(services_discovery_t *sd)
@@ -59,6 +61,7 @@ bool ConnectSD(services_discovery_t *sd)
 
     char *host = var_GetString(sd, CFG_PREFIX"host");
     int port = var_GetInteger(sd, CFG_PREFIX"port");
+    sys->disconnect = var_GetBool(sd, CFG_PREFIX"disconnect");
 
     if(port == 0)
         port = 9982;
@@ -279,18 +282,20 @@ void * RunSD(void *obj)
 
     GetChannels(sd);
 
-    for(;;)
+    while(!sys->disconnect)
     {
         HtsMessage msg = ReadMessage(sd, sys);
         if(!msg.isValid())
-            return 0;
+            break;
 
         std::string method = msg.getRoot()->getStr("method");
         if(method.empty())
-            return 0;
+            break;
 
         msg_Dbg(sd, "Got Message with method %s", method.c_str());
     }
+
+    net_Close(sys->netfd);
 
     return 0;
 }

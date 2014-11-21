@@ -305,33 +305,15 @@ bool SubscribeHTSP(demux_t *demux)
         if(s)
             free(s);
 
-        s = var_InheritString(demux, CFG_PREFIX"vextra");
-        if(s && *s)
-            map.setData("videoExtra", s);
-        if(s)
-            free(s);
-
         s = var_InheritString(demux, CFG_PREFIX"acodec");
         if(s && *s)
             map.setData("audioCodec", s);
         if(s)
             free(s);
 
-        s = var_InheritString(demux, CFG_PREFIX"aextra");
-        if(s && *s)
-            map.setData("audioExtra", s);
-        if(s)
-            free(s);
-
         s = var_InheritString(demux, CFG_PREFIX"scodec");
         if(s && *s)
             map.setData("subtitleCodec", s);
-        if(s)
-            free(s);
-
-        s = var_InheritString(demux, CFG_PREFIX"sextra");
-        if(s && *s)
-            map.setData("subtitleExtra", s);
         if(s)
             free(s);
 
