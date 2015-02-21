@@ -738,9 +738,9 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
         {
             es_format_Init(fmt, AUDIO_ES, VLC_CODEC_MP4A);
         }
-        else if(type == "AACLATM")
+        else if(type == "VORBIS")
         {
-            es_format_Init(fmt, AUDIO_ES, VLC_CODEC_MP4A);
+            es_format_Init(fmt, AUDIO_ES, VLC_CODEC_VORBIS);
         }
         else if(type == "MPEG2VIDEO")
         {
@@ -788,6 +788,16 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
         {
             fmt->audio.i_physical_channels = map->getU32("channels");
             fmt->audio.i_rate = map->getU32("rate");
+        }
+
+        void *meta = 0;
+        uint32_t metalen = 0;
+        map->getBin("meta", &metalen, &meta);
+
+        if(meta)
+        {
+            fmt->i_extra = metalen;
+            fmt->p_extra = meta;
         }
 
         std::string lang = map->getStr("language");
