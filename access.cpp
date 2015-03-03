@@ -23,6 +23,11 @@
 #include <queue>
 #include <atomic>
 
+#include "access.h"
+#include "helper.h"
+#include "htsmessage.h"
+#include "sha1.h"
+
 #include <vlc_common.h>
 #include <vlc_demux.h>
 #include <vlc_access.h>
@@ -31,11 +36,6 @@
 #include <vlc_epg.h>
 #include <vlc_meta.h>
 #include <vlc_input.h>
-
-#include "access.h"
-#include "helper.h"
-#include "htsmessage.h"
-#include "sha1.h"
 
 #define DEMUX_EOF 0
 #define DEMUX_OK 1

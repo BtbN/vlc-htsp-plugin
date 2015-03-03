@@ -20,11 +20,11 @@
 
 #include <ctime>
 
-#include <vlc_common.h>
-#include <vlc_network.h>
-
 #include "helper.h"
 #include "htsmessage.h"
+
+#include <vlc_common.h>
+#include <vlc_network.h>
 
 
 sys_common_t::~sys_common_t()

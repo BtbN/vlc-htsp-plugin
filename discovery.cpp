@@ -22,15 +22,15 @@
 #include <unordered_map>
 #include <sstream>
 
-#include <vlc_common.h>
-#include <vlc_plugin.h>
-#include <vlc_network.h>
-#include <vlc_services_discovery.h>
-
 #include "discovery.h"
 #include "helper.h"
 #include "htsmessage.h"
 #include "sha1.h"
+
+#include <vlc_common.h>
+#include <vlc_plugin.h>
+#include <vlc_network.h>
+#include <vlc_services_discovery.h>
 
 struct tmp_channel
 {

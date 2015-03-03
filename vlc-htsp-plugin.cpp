@@ -16,15 +16,16 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
+#include "discovery.h"
+#include "access.h"
+#include "helper.h"
+
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_demux.h>
 #include <vlc_access.h>
 #include <vlc_services_discovery.h>
 
-#include "discovery.h"
-#include "access.h"
-#include "helper.h"
 
 VLC_SD_PROBE_HELPER( "htsp", "Tvheadend HTSP", SD_CAT_LAN )
 
