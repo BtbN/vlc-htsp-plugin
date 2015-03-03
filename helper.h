@@ -19,11 +19,13 @@
 #ifndef H__HELPER_H__
 #define H__HELPER_H__
 
-#include <vlc_common.h>
 #include <string>
 #include <deque>
 
 #include "htsmessage.h"
+
+#include <vlc_common.h>
+
 
 #define CFG_PREFIX "htsp-"
 #define MAX_QUEUE_SIZE 1000
