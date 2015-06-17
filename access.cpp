@@ -905,7 +905,7 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
         return false;
     }
 
-    if(index > sys->streamCount || index == 0)
+    if(index == 0)
     {
         free(bin);
         msg_Err(demux, "Invalid stream index detected: %d with %d streams", index, sys->streamCount);
