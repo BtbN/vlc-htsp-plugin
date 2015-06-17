@@ -44,12 +44,14 @@
 struct hts_stream
 {
     hts_stream()
-        :es(0)
+        :index(0)
+        ,es(0)
         ,lastDts(0)
         ,lastPts(0)
         ,ignoreTime(false)
     {}
 
+    uint32_t index;
     es_out_id_t *es;
     es_format_t fmt;
     mtime_t lastDts;
@@ -717,10 +719,11 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
         if(!map->contains("index"))
             continue;
-        uint32_t index = map->getU32("index");
-        int i = index - 1;
 
-        es_format_t *fmt = &(sys->stream[i].fmt);
+        uint32_t index = map->getU32("index");
+	sys->stream[jj].index = index;
+
+        es_format_t *fmt = &(sys->stream[jj].fmt);
 
         if(type == "AC3")
         {
@@ -753,22 +756,22 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
         else if(type == "DVBSUB")
         {
             es_format_Init(fmt, SPU_ES, VLC_CODEC_DVBS);
-            sys->stream[i].ignoreTime = true;
+            sys->stream[jj].ignoreTime = true;
         }
         else if(type == "TEXTSUB")
         {
             es_format_Init(fmt, SPU_ES, VLC_CODEC_TEXT);
-            sys->stream[i].ignoreTime = true;
+            sys->stream[jj].ignoreTime = true;
         }
         else if(type == "TELETEXT")
         {
             es_format_Init(fmt, SPU_ES, VLC_CODEC_TELETEXT);
-            sys->stream[i].ignoreTime = true;
+            sys->stream[jj].ignoreTime = true;
         }
         else
         {
-            sys->stream[i].es = 0;
-            sys->stream[i].ignoreTime = true;
+            sys->stream[jj].es = 0;
+            sys->stream[jj].ignoreTime = true;
             continue;
         }
 
@@ -776,7 +779,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
         {
             if(sys->audioOnly)
             {
-                sys->stream[i].es = 0;
+                sys->stream[jj].es = 0;
                 sys->disables.push_back(index);
                 continue;
             }
@@ -810,7 +813,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
 
         fmt->i_group = sys->channelId;
 
-        sys->stream[i].es = es_out_Add(demux->out, fmt);
+        sys->stream[jj].es = es_out_Add(demux->out, fmt);
 
         msg_Dbg(demux, "Found elementary stream id %d, type %s", index, type.c_str());
     }
@@ -909,7 +912,23 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
         return false;
     }
 
-    if(sys->stream[index - 1].es == 0)
+    int streamIndex = -1;
+    for(uint32_t i = 0; i < sys->streamCount; i++)
+    {
+        if (index == sys->stream[i].index)
+        {
+            streamIndex = i;
+            break;
+        }
+    }
+
+    if (streamIndex == -1)
+    {
+        msg_Err(demux, "Unknown stream index %u!", index);
+        return false;
+    }
+
+    if(sys->stream[streamIndex].es == 0)
     {
         free(bin);
         return true;
@@ -938,13 +957,13 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
     if(duration != 0)
         block->i_length = duration;
 
-    if(pts > 0 && !sys->stream[index - 1].ignoreTime)
-        sys->stream[index - 1].lastPts = pts;
-    if(dts > 0 && !sys->stream[index - 1].ignoreTime)
-        sys->stream[index - 1].lastDts = dts;
+    if(pts > 0 && !sys->stream[streamIndex].ignoreTime)
+        sys->stream[streamIndex].lastPts = pts;
+    if(dts > 0 && !sys->stream[streamIndex].ignoreTime)
+        sys->stream[streamIndex].lastDts = dts;
 
     frametype = msg.getRoot()->getU32("frametype");
-    if(sys->stream[index - 1].fmt.i_cat == VIDEO_ES && frametype != 0)
+    if(sys->stream[streamIndex].fmt.i_cat == VIDEO_ES && frametype != 0)
     {
         char ft = (char)frametype;
 
@@ -991,7 +1010,7 @@ bool ParseMuxPacket(demux_t *demux, HtsMessage &msg)
         }
     }
 
-    es_out_Send(demux->out, sys->stream[index - 1].es, block);
+    es_out_Send(demux->out, sys->stream[streamIndex].es, block);
 
     return true;
 }
