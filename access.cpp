@@ -721,7 +721,7 @@ bool ParseSubscriptionStart(demux_t *demux, HtsMessage &msg)
             continue;
 
         uint32_t index = map->getU32("index");
-	sys->stream[jj].index = index;
+        sys->stream[jj].index = index;
 
         es_format_t *fmt = &(sys->stream[jj].fmt);
 
