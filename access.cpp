@@ -296,6 +296,17 @@ bool SubscribeHTSP(demux_t *demux)
     map.setData("timeshiftPeriod", (uint32_t)~0);
     map.setData("normts", 1);
 
+    if(var_InheritBool(demux, CFG_PREFIX"useprofile"))
+    {
+        char *s;
+
+        s = var_InheritString(demux, CFG_PREFIX"profile");
+        if(s && *s)
+            map.setData("profile", s);
+        if(s)
+            free(s);
+    }
+
     if(var_InheritBool(demux, CFG_PREFIX"transcode"))
     {
         char *s;
