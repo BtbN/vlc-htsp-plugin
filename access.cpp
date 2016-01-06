@@ -1040,12 +1040,13 @@ bool ParseSubscriptionSkip(demux_t *demux, HtsMessage &msg)
 
     msg_Info(demux, "SubscriptionSkip: newTime: %lld, base: %s", (long long int)newTime, (msg.getRoot()->getU32("absolute"))?"abs":"rel");
 
-    es_out_Control(demux->out, ES_OUT_SET_PCR, VLC_TS_0 + newTime);
+    es_out_Control(demux->out, ES_OUT_RESET_PCR);
 
     msg_Info(demux, "PCR Reset done");
 
-    sys->lastPcr = newTime;
-    sys->currentPcr = newTime;
+    sys->lastPcr = 0;
+    sys->currentPcr = 0;
+
     sys->tsOffset = 0;
 
     return true;
