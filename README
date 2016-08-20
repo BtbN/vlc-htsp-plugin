@@ -1,3 +1,9 @@
+I am no longer working on this, primarily because I stopped watching TV and thus using tvheadend.
+Also, if you export an m3u playlist of your channels from tvh, and open it in VLC, you have the same set of features
+this plugin offers, just without all the weird bugs.
+
+-------------------------------------
+
 Compile using make and put resulting libhtsp_plugin.so somewhere VLC finds it.
 
 Some settings are available for the service discovery. Filter advanced settings for HTS to easily find them.
